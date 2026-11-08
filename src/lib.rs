@@ -16,11 +16,19 @@
 //!   about half a minute; a loop that does real work per entry takes far longer. A table whose every
 //!   slot has retired refuses every insert for good.
 //! - Insert scans for a free slot in O(N); `get` and `get_mut` are O(1).
+//!
+//! # Traits
+//!
+//! `Table<T, N>` implements `Clone` when `T: Clone` and `Debug` when `T: Debug`. It has no
+//! `Default` beyond [`Table::new`]'s empty table, no `PartialEq` and no `Hash`. `EntryName<T>`
+//! implements `Clone`, `Copy`, `PartialEq`, `Eq`, `Hash` and `Debug` for every `T`, and no
+//! `Default`: every `u64` is a name, so there is no name to call the default.
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
 
 use core::fmt;
+use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 
 #[cfg(doctest)]
@@ -36,7 +44,7 @@ struct ReadmeExample;
 /// gives each its own entry type (a one-field wrapper is enough).
 ///
 /// `T` is only a tag. The name holds no `T` and needs nothing of it: `Copy`, `Clone`, `PartialEq`,
-/// `Eq` and `Debug` hold for every `T`, implemented by hand because a derive would demand them of
+/// `Eq`, `Hash` and `Debug` hold for every `T`, implemented by hand because a derive would demand them of
 /// `T`, and `Send` and `Sync` hold for every `T` because the marker is `PhantomData<fn() -> T>`.
 ///
 /// [`from_bits`](Self::from_bits) and [`to_bits`](Self::to_bits) cross a boundary that carries a
@@ -105,6 +113,12 @@ impl<T> PartialEq for EntryName<T> {
 
 impl<T> Eq for EntryName<T> {}
 
+impl<T> Hash for EntryName<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.bits.hash(state);
+    }
+}
+
 /// Prints the generation and the slot, the two things a reader of a name wants.
 impl<T> fmt::Debug for EntryName<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -141,6 +155,41 @@ impl<T> fmt::Debug for EntryName<T> {
 /// assert_eq!(t.get(a), None);
 /// assert_eq!(t.get(b), Some(&"second"));
 /// ```
+///
+/// # Traits
+///
+/// `Clone` needs `T: Clone`. A clone holds the same entries in the same slots at the same
+/// generations, so every name that resolves in the original resolves to a clone of the same entry
+/// in the copy, and every dead name stays dead. The two tables then evolve apart.
+///
+/// `Debug` needs `T: Debug` and prints the table as `Table { len, capacity, entries }`. `len` is the
+/// number of live entries and `capacity` is `N`. `entries` is a map from each live entry's name
+/// (printed as its generation and slot) to the entry, in slot order. Free and retired slots print
+/// nothing, so the output grows with the live entries and not with `N`, and printing never panics.
+///
+/// ```
+/// use generational_table::Table;
+///
+/// let mut t: Table<&str, 1000> = Table::new();
+/// let a = t.insert_with(|_| "a").unwrap();
+/// t.insert_with(|_| "b").unwrap();
+/// t.remove(a);
+/// let c = t.insert_with(|_| "c").unwrap();
+///
+/// assert_eq!(
+///     format!("{t:?}"),
+///     "Table { len: 2, capacity: 1000, entries: \
+///      {EntryName { generation: 1, slot: 0 }: \"c\", EntryName { generation: 0, slot: 1 }: \"b\"} }"
+/// );
+///
+/// // A clone resolves the same names, and then goes its own way.
+/// let mut copy = t.clone();
+/// assert_eq!(copy.get(c), Some(&"c"));
+/// copy.remove(c);
+/// assert_eq!(t.get(c), Some(&"c"));
+/// assert_eq!(copy.get(c), None);
+/// ```
+#[derive(Clone)]
 pub struct Table<T, const N: usize> {
     slots: [Option<T>; N],
     /// The current generation of each slot: the one a live occupant's name carries, and the one
@@ -353,6 +402,28 @@ impl<T, const N: usize> Table<T, N> {
 impl<T, const N: usize> Default for Table<T, N> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Prints `Table { len, capacity, entries }`, where `entries` maps the name of each live entry to
+/// the entry, in slot order. Only live entries print, so the output is bounded by `len` and not by
+/// `N`. See the type's documentation for the format.
+impl<T: fmt::Debug, const N: usize> fmt::Debug for Table<T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Table")
+            .field("len", &self.live)
+            .field("capacity", &N)
+            .field("entries", &LiveEntries(self))
+            .finish()
+    }
+}
+
+/// The live entries of a table, printed as a map from name to entry.
+struct LiveEntries<'a, T, const N: usize>(&'a Table<T, N>);
+
+impl<T: fmt::Debug, const N: usize> fmt::Debug for LiveEntries<'_, T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map().entries(self.0.iter()).finish()
     }
 }
 
@@ -618,5 +689,122 @@ mod tests {
         struct NotDebug;
         let name = EntryName::<NotDebug>::from_bits((3 << 32) | 5);
         assert_eq!(format!("{name:?}"), "EntryName { generation: 3, slot: 5 }");
+    }
+
+    /// A name hashes and compares by its bits, and needs nothing of the entry type.
+    #[test]
+    fn a_name_is_hashable_and_copyable_without_bounds_on_the_entry() {
+        use std::collections::HashSet;
+        struct Bare;
+        let name = EntryName::<Bare>::from_bits(7);
+        let copy = name;
+        let mut set = HashSet::new();
+        set.insert(name);
+        assert!(set.contains(&copy));
+        assert!(!set.contains(&EntryName::from_bits(8)));
+
+        use std::hash::{BuildHasher, RandomState};
+        let state = RandomState::new();
+        assert_eq!(state.hash_one(name), state.hash_one(copy));
+        assert_ne!(
+            state.hash_one(name),
+            state.hash_one(EntryName::<Bare>::from_bits(8))
+        );
+    }
+
+    /// An empty table prints its counts and an empty map.
+    #[test]
+    fn an_empty_table_prints_no_entries() {
+        let t: Table<u32, 4> = Table::new();
+        assert_eq!(
+            format!("{t:?}"),
+            "Table { len: 0, capacity: 4, entries: {} }"
+        );
+    }
+
+    /// Free slots, holes and retired slots print nothing; a reused slot prints its raised
+    /// generation.
+    #[test]
+    fn debug_prints_only_live_entries_with_their_generations() {
+        let mut t: Table<u32, 4> = Table::new();
+        t.generations[3] = Table::<u32, 4>::RETIRED;
+        let a = t.insert_with(|_| 10).unwrap();
+        t.insert_with(|_| 20).unwrap();
+        t.remove(a);
+        t.insert_with(|_| 30).unwrap();
+        assert_eq!(
+            format!("{t:?}"),
+            "Table { len: 2, capacity: 4, entries: {EntryName { generation: 1, slot: 0 }: 30, \
+             EntryName { generation: 0, slot: 1 }: 20} }"
+        );
+    }
+
+    /// Output scales with live entries, not with capacity, and a retired table prints without
+    /// panicking.
+    #[test]
+    fn debug_output_does_not_grow_with_capacity() {
+        let mut t: Table<u32, 10_000> = Table::new();
+        t.insert_with(|_| 1).unwrap();
+        assert!(format!("{t:?}").len() < 120);
+        let retired: Table<u32, 2> = Table {
+            generations: [Table::<u32, 2>::RETIRED; 2],
+            ..Table::new()
+        };
+        assert_eq!(
+            format!("{retired:?}"),
+            "Table { len: 0, capacity: 2, entries: {} }"
+        );
+    }
+
+    /// The alternate form pretty-prints through the same path.
+    #[test]
+    fn debug_supports_the_alternate_form() {
+        let mut t: Table<u32, 2> = Table::new();
+        t.insert_with(|_| 5).unwrap();
+        let pretty = format!("{t:#?}");
+        assert!(pretty.contains("len: 1,") && pretty.contains("capacity: 2,"));
+    }
+
+    /// A clone resolves every name the original does, including after reuse, and keeps dead names
+    /// dead. The two then change independently.
+    #[test]
+    fn a_clone_resolves_the_same_names_and_then_diverges() {
+        let mut t: Table<String, 3> = Table::new();
+        let a = t.insert_with(|_| "a".into()).unwrap();
+        let b = t.insert_with(|_| "b".into()).unwrap();
+        t.remove(a);
+        let c = t.insert_with(|_| "c".into()).unwrap();
+
+        let mut copy = t.clone();
+        assert_eq!(copy.len(), t.len());
+        assert_eq!(copy.get(a), None, "a dead name came back in the clone");
+        assert_eq!(copy.get(b), t.get(b));
+        assert_eq!(copy.get(c), t.get(c));
+        assert_eq!(
+            copy.iter().collect::<Vec<_>>(),
+            t.iter().collect::<Vec<_>>()
+        );
+
+        // The clone keeps minting the names the original would.
+        let next_original = t.clone().insert_with(|_| "d".into());
+        assert_eq!(copy.insert_with(|_| "d".into()), next_original);
+
+        copy.remove(b);
+        assert_eq!(
+            t.get(b).map(String::as_str),
+            Some("b"),
+            "the clone shared storage"
+        );
+        assert_eq!(copy.get(b), None);
+    }
+
+    /// A clone of a table with retired slots keeps them retired.
+    #[test]
+    fn a_clone_keeps_retired_slots_retired() {
+        let mut t: Table<u32, 2> = Table::new();
+        t.generations[0] = Table::<u32, 2>::RETIRED;
+        let mut copy = t.clone();
+        let name = copy.insert_with(|_| 1).unwrap();
+        assert_eq!(name.to_bits() & 0xffff_ffff, 1);
     }
 }
