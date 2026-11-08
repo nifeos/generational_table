@@ -1,0 +1,15 @@
+# cargo-mutants configuration, read from the crate root.
+#
+# src/verification.rs is `#[cfg(kani)]` (see the end of src/lib.rs), so `cargo test` never
+# compiles it: a change to it cannot fail any test, and every mutant of it survives for that reason
+# alone. Kani checks its proofs in CI, and each proof carries a falsification patch under
+# falsifications/ that must make Kani fail. That is this file's mutation testing.
+exclude_globs = ["src/verification.rs"]
+
+# `Table::name` packs a name as `(generation << 32) | slot`. `Table::new` refuses `N` above
+# `u32::MAX` at compile time, so the slot fits in the low 32 bits and shares no bit with the
+# shifted generation. For disjoint operands `x | y` and `x ^ y` are the same number, so replacing
+# the `|` with `^` changes no name and no test can tell. The pattern names the function, not the
+# line, so it keeps matching when the file moves; if the function is renamed, the pattern stops
+# matching and the weekly mutation gate fails, which is the safe direction.
+exclude_re = ['replace \| with \^ in Table<T, N>::name$']
