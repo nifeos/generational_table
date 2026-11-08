@@ -8,11 +8,11 @@ itself minted still resolves correctly.
 Expected to fail: the harness's `assert_eq!(Some(probe), minted)`, on any u64 whose low half is
 a live slot index and whose high half is anything at all. A name may come from an untrusted
 caller, so this is the forging case: the table would resolve a number nobody was ever issued.
-
 diff --git a/src/lib.rs b/src/lib.rs
+index fec9a86..829bfbb 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -222,9 +222,7 @@
+@@ -222,9 +222,7 @@ impl<T, const N: usize> Table<T, N> {
      /// that proves a stale name never resolves proves it for `slot_of` too.
      pub fn slot_of(&self, name: EntryName<T>) -> Option<usize> {
          let (slot, generation) = Self::unpack(name);

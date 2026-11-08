@@ -152,7 +152,7 @@ pub struct Table<T, const N: usize> {
     live: usize,
     /// One past the highest live slot. Every slot at or above it is `None`, so a walk bounded by
     /// it sees every live entry and costs what the table holds rather than `N`. First-fit insert
-    /// keeps it near [`len`](Self::len), and [`remove`](Self::remove) brings it down in amortised
+    /// keeps it near [`len`](Self::len), and [`remove`](Self::remove) brings it down in amortized
     /// O(1): a step down happens at most once per slot that was filled and freed.
     top: usize,
 }
@@ -255,7 +255,7 @@ impl<T, const N: usize> Table<T, N> {
         if slot + 1 == self.top {
             // A `for` over `N`, not a `while`: CBMC cannot see `top <= N` from the field, so a
             // `while` unwinds without limit and the Kani harness never finishes. The `break` keeps
-            // the cost amortised O(1).
+            // the cost amortized O(1).
             let mut top = self.top;
             for _ in 0..N {
                 if top == 0 || self.slots[top - 1].is_some() {
@@ -356,163 +356,8 @@ impl<T, const N: usize> Default for Table<T, N> {
     }
 }
 
-/// Machine-checked proofs, with Kani. These are the properties a caller that stores names in
-/// long-lived records leans on. A two-slot table exhibits every case that matters: the slot in question, a different slot, and reuse.
 #[cfg(kani)]
-mod verification {
-    use super::*;
-
-    /// Falsification: replayable `falsifications/verification.a_removed_name_never_resolves_again.patch`
-    /// A removed name never resolves again, even after its slot is reused. This is the
-    /// safety a never-reused counter would give, kept under reuse: the
-    /// old name and the new occupant's name differ (the generation moved), so `get`, `get_mut`,
-    /// and `remove` all refuse the old one. The table starts at any generations at all, the last
-    /// one before retirement and a retired slot included, so this holds for the 2^32nd reuse as
-    /// for the first; [`a_removed_name_stays_dead_whatever_comes_after`] carries it forward.
-    #[kani::proof]
-    fn a_removed_name_never_resolves_again() {
-        let mut t: Table<u8, 2> = Table::new();
-        t.generations = [kani::any(), kani::any()];
-        kani::cover!(
-            t.generations[0] == Table::<u8, 2>::RETIRED - 1,
-            "the last occupant a slot takes"
-        );
-        let Some(name) = t.insert_with(|_| kani::any()) else {
-            return;
-        };
-        t.remove(name);
-
-        // Reuse the slot: the new occupant must not be reachable through the dead name.
-        let reused = t.insert_with(|_| kani::any());
-        if let Some(new_name) = reused {
-            assert_ne!(new_name, name);
-        }
-        assert!(t.get(name).is_none());
-        assert!(t.get_mut(name).is_none());
-        assert!(t.remove(name).is_none());
-    }
-
-    /// A table in any state the operations can reach, for N = 2: each slot free or live, with
-    /// any generation, except that a live slot is never at `RETIRED`. `live` and `top` follow
-    /// from the slots, as insert and remove keep them.
-    fn any_reachable_table() -> Table<u8, 2> {
-        let mut t: Table<u8, 2> = Table::new();
-        for slot in 0..2 {
-            t.generations[slot] = kani::any();
-            if kani::any() {
-                kani::assume(t.generations[slot] != Table::<u8, 2>::RETIRED);
-                t.slots[slot] = Some(kani::any());
-                t.live += 1;
-                t.top = slot + 1;
-            }
-        }
-        t
-    }
-
-    /// One insert or one remove of any name, the two operations that change generations.
-    fn any_operation(t: &mut Table<u8, 2>) {
-        if kani::any() {
-            let _ = t.insert_with(|_| kani::any());
-        } else {
-            let _ = t.remove(EntryName::from_bits(kani::any()));
-        }
-    }
-
-    /// Falsification: replayable `falsifications/verification.a_removed_name_stays_dead_whatever_comes_after.patch`
-    /// A dead name stays dead whatever operations follow, with no bound on how many. The
-    /// induction step: from any reachable table and any name whose generation is below its slot's,
-    /// which is what a removal leaves behind, two arbitrary operations keep the slot's generation
-    /// above the name's and every live slot below `RETIRED`, and the name resolves nowhere. Both
-    /// facts are what the step assumes, so they hold after any number of operations, and a slot
-    /// reused 2^32 times cannot bring an old name back. Two operations, not one, because a
-    /// wrapping table needs an insert and a remove to come round.
-    #[kani::proof]
-    fn a_removed_name_stays_dead_whatever_comes_after() {
-        let mut t = any_reachable_table();
-        let slot: usize = kani::any();
-        kani::assume(slot < 2);
-        let generation: u32 = kani::any();
-        kani::assume(generation < t.generations[slot]);
-        let dead = Table::<u8, 2>::name(slot, generation);
-        kani::cover!(
-            t.generations[slot] == Table::<u8, 2>::RETIRED && t.slots[slot].is_none(),
-            "a retired slot"
-        );
-
-        for _ in 0..2 {
-            any_operation(&mut t);
-            assert!(
-                generation < t.generations[slot],
-                "a slot's generation came back down"
-            );
-            for s in 0..2 {
-                assert!(t.slots[s].is_none() || t.generations[s] != Table::<u8, 2>::RETIRED);
-            }
-            assert!(t.get(dead).is_none());
-        }
-    }
-
-    /// Falsification: replayable `falsifications/verification.live_names_are_distinct_and_resolve_to_their_own_entry.patch`
-    /// Two live entries never share a name, and each name resolves to its own entry: the
-    /// packing cannot alias two occupants.
-    #[kani::proof]
-    fn live_names_are_distinct_and_resolve_to_their_own_entry() {
-        let mut t: Table<u8, 2> = Table::new();
-        let (a_value, b_value): (u8, u8) = (kani::any(), kani::any());
-        let a = t.insert_with(|_| a_value).unwrap();
-        let b = t.insert_with(|_| b_value).unwrap();
-
-        assert_ne!(a, b);
-        assert_eq!(t.get(a).copied(), Some(a_value));
-        assert_eq!(t.get(b).copied(), Some(b_value));
-    }
-
-    /// Falsification: replayable `falsifications/verification.a_name_the_table_never_minted_resolves_to_nothing.patch`
-    /// A garbage name resolves to nothing. For any u64 whatsoever, the name `from_bits` makes of it
-    /// either fails to resolve or is exactly the name the table minted: there is no input that
-    /// reaches an entry through a name the table never issued. (A name may arrive from an untrusted
-    /// caller; this is the "cannot forge" claim for names.)
-    #[kani::proof]
-    fn a_name_the_table_never_minted_resolves_to_nothing() {
-        let mut t: Table<u8, 2> = Table::new();
-        let minted = t.insert_with(|_| kani::any());
-        let probe = EntryName::from_bits(kani::any());
-        if t.get(probe).is_some() {
-            assert_eq!(Some(probe), minted);
-        }
-    }
-
-    /// Falsification: replayable `falsifications/verification.a_bounded_walk_yields_every_live_entry.patch`
-    /// The occupancy bound never hides a live entry. Fill three slots, remove an arbitrary subset
-    /// (all eight, holes under a live entry and the empty table included), and every walk must
-    /// report exactly as many entries as `len` claims. A subset rather than an operation sequence,
-    /// which did not finish in a practical time under Kani.
-    #[kani::proof]
-    fn a_bounded_walk_yields_every_live_entry() {
-        let mut t: Table<u8, 3> = Table::new();
-        let names = [
-            t.insert_with(|_| 1).unwrap(),
-            t.insert_with(|_| 2).unwrap(),
-            t.insert_with(|_| 3).unwrap(),
-        ];
-
-        let drop_it: [bool; 3] = [kani::any(), kani::any(), kani::any()];
-        for (name, drop_it) in names.iter().zip(drop_it) {
-            if drop_it {
-                t.remove(*name);
-            }
-        }
-
-        assert_eq!(t.values().count(), t.len());
-        assert_eq!(t.live_slots().count(), t.len());
-        assert_eq!(t.iter_from(0).count(), t.len());
-
-        // And each survivor is still reachable by name, so the walk and the lookup agree.
-        for (name, dropped) in names.iter().zip(drop_it) {
-            assert_eq!(t.get(*name).is_some(), !dropped);
-        }
-    }
-}
+mod verification;
 
 #[cfg(test)]
 mod tests {

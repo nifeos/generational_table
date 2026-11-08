@@ -8,12 +8,12 @@ removals happen in insertion order, which is the common case, the answer is unch
 Expected to fail: the harness's `assert_eq!(t.values().count(), t.len())`, whenever the topmost
 entry is removed while a lower one is live: `top` walks to zero and every walk bounded by it
 reports an empty table while `len` still counts the survivors.
-
 diff --git a/src/lib.rs b/src/lib.rs
+index fec9a86..1f08c57 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -258,7 +258,7 @@
-             // the cost amortised O(1).
+@@ -258,7 +258,7 @@ impl<T, const N: usize> Table<T, N> {
+             // the cost amortized O(1).
              let mut top = self.top;
              for _ in 0..N {
 -                if top == 0 || self.slots[top - 1].is_some() {

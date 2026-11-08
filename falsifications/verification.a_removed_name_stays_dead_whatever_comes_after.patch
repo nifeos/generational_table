@@ -10,11 +10,11 @@ Expected to fail: the harness's assertion that every live slot stays below `RETI
 first operation fills a slot that sits at `RETIRED`; and on the second operation, removing that
 occupant, its assertion that the dead name's slot generation stays above the name's, when the
 bump wraps it to 0.
-
 diff --git a/src/lib.rs b/src/lib.rs
+index fec9a86..e0d48d9 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -200,11 +200,7 @@
+@@ -200,11 +200,7 @@ impl<T, const N: usize> Table<T, N> {
      /// assert!(t.insert_with(|_| 3).is_none(), "a full table refuses");
      /// ```
      pub fn insert_with(&mut self, f: impl FnOnce(EntryName<T>) -> T) -> Option<EntryName<T>> {
@@ -27,7 +27,7 @@ diff --git a/src/lib.rs b/src/lib.rs
          let name = Self::name(slot, self.generations[slot]);
          self.slots[slot] = Some(f(name));
          self.live += 1;
-@@ -248,7 +244,7 @@
+@@ -248,7 +244,7 @@ impl<T, const N: usize> Table<T, N> {
      pub fn remove(&mut self, name: EntryName<T>) -> Option<T> {
          let slot = self.slot_of(name)?;
          let value = self.slots[slot].take()?;
