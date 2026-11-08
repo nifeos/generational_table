@@ -1,0 +1,38 @@
+Falsifies `generational_table::verification::a_removed_name_stays_dead_whatever_comes_after`.
+
+The defect: insert stops passing over a retired slot, and the bump wraps instead of saturating.
+Each change reads as harmless alone: a free slot looks fillable whatever its generation, and a
+wrapping add looks like the overflow-safe spelling of `+ 1`. Together they are a table whose
+generation comes round after 2^32 occupants of one slot, so the slot's next occupant after that
+is named like an ancient, removed one.
+
+Expected to fail: the harness's assertion that every live slot stays below `RETIRED`, when the
+first operation fills a slot that sits at `RETIRED`; and on the second operation, removing that
+occupant, its assertion that the dead name's slot generation stays above the name's, when the
+bump wraps it to 0.
+
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -200,11 +200,7 @@
+     /// assert!(t.insert_with(|_| 3).is_none(), "a full table refuses");
+     /// ```
+     pub fn insert_with(&mut self, f: impl FnOnce(EntryName<T>) -> T) -> Option<EntryName<T>> {
+-        let slot = self
+-            .slots
+-            .iter()
+-            .zip(&self.generations)
+-            .position(|(s, &g)| s.is_none() && g != Self::RETIRED)?;
++        let slot = self.slots.iter().position(|s| s.is_none())?;
+         let name = Self::name(slot, self.generations[slot]);
+         self.slots[slot] = Some(f(name));
+         self.live += 1;
+@@ -248,7 +244,7 @@
+     pub fn remove(&mut self, name: EntryName<T>) -> Option<T> {
+         let slot = self.slot_of(name)?;
+         let value = self.slots[slot].take()?;
+-        self.generations[slot] = self.generations[slot].saturating_add(1);
++        self.generations[slot] = self.generations[slot].wrapping_add(1);
+         self.live -= 1;
+         // Removing anything below the top leaves a hole, which costs a walk nothing to skip.
+         // Removing the top one means the bound can come down, past however many holes are under it.
