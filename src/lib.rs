@@ -160,35 +160,8 @@ impl<T> fmt::Debug for EntryName<T> {
 ///
 /// `Clone` needs `T: Clone`. A clone holds the same entries in the same slots at the same
 /// generations, so every name that resolves in the original resolves to a clone of the same entry
-/// in the copy, and every dead name stays dead. The two tables then evolve apart.
-///
-/// `Debug` needs `T: Debug` and prints the table as `Table { len, capacity, entries }`. `len` is the
-/// number of live entries and `capacity` is `N`. `entries` is a map from each live entry's name
-/// (printed as its generation and slot) to the entry, in slot order. Free and retired slots print
-/// nothing, so the output grows with the live entries and not with `N`, and printing never panics.
-///
-/// ```
-/// use generational_table::Table;
-///
-/// let mut t: Table<&str, 1000> = Table::new();
-/// let a = t.insert_with(|_| "a").unwrap();
-/// t.insert_with(|_| "b").unwrap();
-/// t.remove(a);
-/// let c = t.insert_with(|_| "c").unwrap();
-///
-/// assert_eq!(
-///     format!("{t:?}"),
-///     "Table { len: 2, capacity: 1000, entries: \
-///      {EntryName { generation: 1, slot: 0 }: \"c\", EntryName { generation: 0, slot: 1 }: \"b\"} }"
-/// );
-///
-/// // A clone resolves the same names, and then goes its own way.
-/// let mut copy = t.clone();
-/// assert_eq!(copy.get(c), Some(&"c"));
-/// copy.remove(c);
-/// assert_eq!(t.get(c), Some(&"c"));
-/// assert_eq!(copy.get(c), None);
-/// ```
+/// in the copy, and every dead name stays dead. The two tables then evolve apart. `Debug` needs
+/// `T: Debug`; see its implementation for the format.
 #[derive(Clone)]
 pub struct Table<T, const N: usize> {
     slots: [Option<T>; N],
@@ -405,9 +378,33 @@ impl<T, const N: usize> Default for Table<T, N> {
     }
 }
 
-/// Prints `Table { len, capacity, entries }`, where `entries` maps the name of each live entry to
-/// the entry, in slot order. Only live entries print, so the output is bounded by `len` and not by
-/// `N`. See the type's documentation for the format.
+/// Prints the table as `Table { len, capacity, entries }`. `len` is the number of live entries and
+/// `capacity` is `N`. `entries` is a map from each live entry's name (printed as its generation
+/// and slot) to the entry, in slot order. Free and retired slots print nothing, so the output
+/// grows with the live entries and not with `N`, and printing never panics.
+///
+/// ```
+/// use generational_table::Table;
+///
+/// let mut t: Table<&str, 1000> = Table::new();
+/// let a = t.insert_with(|_| "a").unwrap();
+/// t.insert_with(|_| "b").unwrap();
+/// t.remove(a);
+/// let c = t.insert_with(|_| "c").unwrap();
+///
+/// assert_eq!(
+///     format!("{t:?}"),
+///     "Table { len: 2, capacity: 1000, entries: \
+///      {EntryName { generation: 1, slot: 0 }: \"c\", EntryName { generation: 0, slot: 1 }: \"b\"} }"
+/// );
+///
+/// // A clone resolves the same names, and then goes its own way.
+/// let mut copy = t.clone();
+/// assert_eq!(copy.get(c), Some(&"c"));
+/// copy.remove(c);
+/// assert_eq!(t.get(c), Some(&"c"));
+/// assert_eq!(copy.get(c), None);
+/// ```
 impl<T: fmt::Debug, const N: usize> fmt::Debug for Table<T, N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Table")
