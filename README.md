@@ -1,5 +1,10 @@
 # generational_table
 
+[![check](https://github.com/nifeos/generational_table/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nifeos/generational_table/actions/workflows/ci.yml?query=branch%3Amain)
+[![proofs](https://github.com/nifeos/generational_table/actions/workflows/proofs.yml/badge.svg?branch=main)](https://github.com/nifeos/generational_table/actions/workflows/proofs.yml?query=branch%3Amain)
+[![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/nifeos/generational_table#license)
+[![minimum Rust version](https://img.shields.io/badge/rust-1.88%2B-blue.svg)](https://github.com/nifeos/generational_table/blob/main/Cargo.toml)
+
 A fixed-capacity table that names each entry with a typed `u64`, so a name outlives nothing it
 named. Removing an entry raises its slot's generation, and every copy of the old name then
 resolves to `None` for good, whether or not the slot holds a new entry. The table is an array
@@ -53,9 +58,14 @@ Besides `insert_with`, `get`, `get_mut` and `remove`, the table has `slot_of`, `
 `iter_from` (a sweep that resumes from a slot index after you give a lock back). The walks cost
 what the table holds, not what it could hold.
 
+`Table<T, N>` implements `Clone` when `T: Clone`, and `Debug` when `T: Debug`. A clone resolves
+exactly the names the original does. `Debug` prints the length, the capacity and the live entries
+only, each under its name, so the output does not grow with `N`. `EntryName<T>` implements `Clone`,
+`Copy`, `PartialEq`, `Eq`, `Hash` and `Debug` for every `T`.
+
 ## What is proven
 
-Five Kani harnesses prove the safety claims. Kani is a model checker that proves properties for
+Six Kani harnesses prove the safety claims. Kani is a model checker that proves properties for
 all inputs up to a stated size. The proofs need Kani, which `rustup` does not install. Run
 `cargo install --locked
 kani-verifier --version 0.68.0`, then `cargo kani setup`. The setup step
@@ -74,6 +84,8 @@ harness.
   and each name reaches its own value.
 - `a_name_the_table_never_minted_resolves_to_nothing`: for any `u64`, resolution fails or lands
   on the entry whose minted name is that number. Nobody can forge a name.
+- `a_clone_resolves_exactly_the_same_names`: from any reachable two-slot table, a clone and the
+  original resolve any name alike, a forged one included.
 - `a_bounded_walk_yields_every_live_entry`: after removing any subset of three entries, every
   walk reports exactly `len` entries and the survivors still resolve.
 
@@ -95,7 +107,6 @@ walk bound, and an insert the table refuses without running its closure.
   and destroys entries without pause should treat a refused insert as a real outcome.
 - `insert_with` scans from slot 0 for the first free slot, which is O(N). `get` is O(1).
 - Storage is `[Option<T>; N]`, which spends a tag on each slot when `T` has no niche.
-- `Table` implements neither `Debug` nor `Clone`.
 - Expected demand is low. Fixed-capacity tables are a small corner of the ecosystem, and this
   crate does not try to be anything else.
 

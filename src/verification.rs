@@ -154,3 +154,16 @@ fn a_bounded_walk_yields_every_live_entry() {
         assert_eq!(t.get(*name).is_some(), !dropped);
     }
 }
+
+/// Falsification: replayable `falsifications/verification.a_clone_resolves_exactly_the_same_names.patch`
+/// A clone resolves exactly the names the original does: for any name at all, `get` agrees
+/// between the two tables, so a live name reaches an equal entry and a dead or forged name
+/// reaches nothing in both.
+#[kani::proof]
+fn a_clone_resolves_exactly_the_same_names() {
+    let t = any_reachable_table();
+    let copy = t.clone();
+    let probe = EntryName::from_bits(kani::any());
+    assert_eq!(t.get(probe), copy.get(probe));
+    assert_eq!(t.len(), copy.len());
+}

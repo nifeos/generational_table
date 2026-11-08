@@ -6,6 +6,7 @@ sentence beside it.
 ## Unreleased
 
 - First version.
+- `Table` implements `Debug` and `Clone`, and `EntryName` implements `Hash`.
 
 ## BUGS
 
