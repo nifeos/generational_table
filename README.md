@@ -99,7 +99,7 @@ walk bound, and an insert the table refuses without running its closure.
 - Expected demand is low. Fixed-capacity tables are a small corner of the ecosystem, and this
   crate does not try to be anything else.
 
-## How it differs from slotmap and thunderdome
+## How it differs from slotmap, thunderdome, slots and coca
 
 `slotmap` and `thunderdome` are the established, growable members of this family, and for most
 programs one of them is the right choice. They keep their entries in a `Vec`, so they need an
@@ -111,6 +111,38 @@ growth for the opposite properties: a fixed array, no allocation, a `const` cons
 generation that retires a slot rather than wrap, names that nobody can forge from a word, and
 machine-checked proofs of those claims. It costs you the capacity you choose up front and a slot
 now and then in a very long-lived table.
+
+Two crates on crates.io also keep a fixed number of slots in an array, with no allocator. The notes
+below come from reading the published source of `slots` 0.4.0 and `coca` 0.3.0. Both versions date
+from March 2022.
+
+`slots` is a fixed array of `N` slots with no generations. Its `Slots` type hands out a `Key` that
+nobody can copy or clone, and `take` consumes it. The compiler therefore rejects a second use of a
+removed key, which this crate checks only at run time. By default a key also records which `Slots`
+value made it and panics in another, where this crate lets a name from a second table of the same
+entry type resolve there. Its store and take run in constant time from a free list, where this
+crate's `insert_with` scans. The price is that you cannot keep a key as a plain word. `Key::index`
+gives a `usize`, and `try_read` with that index reaches whatever the slot holds now, a later
+occupant included. Its `UnrestrictedSlots` type uses such indexes throughout. Its `new` is not
+`const`, it has no `unsafe` code of its own, and it depends on `array-init`. The published source
+has unit tests and no proofs or fuzzing.
+
+`coca` is the closer match. Its `DirectInlinePool` and `PackedInlinePool` keep `N` entries inline,
+with no allocator unless you turn on its `alloc` feature. Its handles carry a generation, 32 bits in
+the default 64-bit handle, and as few as 16 in a 32-bit handle type from its `handle_type!` macro.
+That macro also gives each pool its own handle type. The generation wraps. Its documentation says so
+and shows a stale 16-bit handle reaching a new value after 32,768 reuses. Safe code cannot build its
+default handle from an integer, since the constructor is an `unsafe` function. This crate offers a
+safe `from_bits` instead and checks the generation on every lookup. `coca` inserts in constant time,
+its `try_insert_with_handle` matches `insert_with`, and its packed pool keeps values in one dense
+array. It also offers vectors, deques, maps and arenas. It uses `unsafe` code throughout its pools,
+and its changelog cites Miri, the Rust interpreter that detects undefined behavior. Its `new` is not
+`const`. The published source has tests and no proofs or fuzzing.
+
+`heapless` 0.9.3 has no generational table. It has fixed-capacity vectors, maps and queues with
+`const` constructors, and its object pool hands out owning `Object` pointers rather than integer
+names. `generational-arena` 0.2.9 forbids `unsafe` code but keeps its entries in a `Vec`, and
+`stable-vec` 0.4.3 keeps a `Vec` with no generations.
 
 ## Minimum Rust version
 
