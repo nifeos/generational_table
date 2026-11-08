@@ -1,5 +1,10 @@
 # generational_table
 
+[![check](https://github.com/nifeos/generational_table/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nifeos/generational_table/actions/workflows/ci.yml?query=branch%3Amain)
+[![proofs](https://github.com/nifeos/generational_table/actions/workflows/proofs.yml/badge.svg?branch=main)](https://github.com/nifeos/generational_table/actions/workflows/proofs.yml?query=branch%3Amain)
+[![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/nifeos/generational_table#license)
+[![minimum Rust version](https://img.shields.io/badge/rust-1.88%2B-blue.svg)](https://github.com/nifeos/generational_table/blob/main/Cargo.toml)
+
 A fixed-capacity table that names each entry with a typed `u64`, so a name outlives nothing it
 named. Removing an entry raises its slot's generation, and every copy of the old name then
 resolves to `None` for good, whether or not the slot holds a new entry. The table is an array
