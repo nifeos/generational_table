@@ -2,7 +2,7 @@
 
 A fixed-capacity table that names each entry with a typed `u64`, so a name outlives nothing it
 named. Removing an entry raises its slot's generation, and every copy of the old name then
-resolves to `None` for good, whether or not the slot has been filled again. The table is an array
+resolves to `None` for good, whether or not the slot holds a new entry. The table is an array
 of `N` slots chosen at compile time: it is `no_std`, needs no allocator, has no dependency, and
 forbids `unsafe` code. Game engines call the same shape a slotmap.
 
@@ -45,7 +45,7 @@ assert!(sessions.get(generational_table::EntryName::NEVER_MINTED).is_none());
 `Table::<T, N>::new` is a `const fn`, so a table can sit in a `static`. A name is an
 `EntryName<T>`, which packs the generation in the high 32 bits of a `u64` and the slot in the low
 32. It carries the entry type `T` as a tag only, so a name from a table of one entry type does not
-compile where another table's name is expected. Two tables of the same entry type share a name
+compile where a function wants another table's name. Two tables of the same entry type share a name
 type; give each its own entry type (a one-field wrapper is enough) to keep them apart.
 
 Besides `insert_with`, `get`, `get_mut` and `remove`, the table has `slot_of`, `len`,
@@ -65,7 +65,7 @@ harness.
 
 - `a_removed_name_never_resolves_again`: from any starting generations, the last one before
   retirement included, a removed name resolves through none of `get`, `get_mut` and `remove`,
-  even after its slot is filled again.
+  even after its slot takes a new entry.
 - `a_removed_name_stays_dead_whatever_comes_after`: the induction step. From any reachable
   two-slot table, any two operations keep a dead name's slot generation above the name's and keep
   every live slot below the retired generation, so the claim holds after any number of
@@ -73,22 +73,22 @@ harness.
 - `live_names_are_distinct_and_resolve_to_their_own_entry`: two live entries never share a name,
   and each name reaches its own value.
 - `a_name_the_table_never_minted_resolves_to_nothing`: for any `u64`, resolution fails or lands
-  on the entry whose minted name is that number. A name cannot be forged.
-- `a_bounded_walk_yields_every_live_entry`: after any subset of three entries is removed, every
+  on the entry whose minted name is that number. Nobody can forge a name.
+- `a_bounded_walk_yields_every_live_entry`: after removing any subset of three entries, every
   walk reports exactly `len` entries and the survivors still resolve.
 
 Each harness has a falsification record at `falsifications/verification.<harness>.patch`.
 Applying it makes that harness fail at its own assertion, which shows the proof checks
 something. The proofs use tables of two or three slots and operation sequences of one or two
 steps. The host tests cover the rest: a retired slot, a fully retired table, the hole below the
-walk bound, and an insert that is refused without running its closure.
+walk bound, and an insert the table refuses without running its closure.
 
 ## BUGS
 
 - Capacity is fixed. `insert_with` returns `None`, without running its closure, when every slot
   is live or retired.
 - Generations are 32-bit and saturate; they never wrap. A slot whose generation reaches
-  `u32::MAX` retires and is never filled again, so the table's capacity shrinks by one. A slot
+  `u32::MAX` retires and never takes an entry again, so the table's capacity shrinks by one. A slot
   retires only after 2^32 - 1 occupants. A loop that does nothing but insert and remove one entry
   can get there in about half a minute (about 7 nanoseconds a cycle on a 2.1 gigahertz server core).
   A table whose every slot has retired refuses every insert for good. A program that creates
@@ -108,7 +108,7 @@ generations wrap, `slotmap` after 2^31 reuses of a slot and `thunderdome` after 
 after that many reuses of one slot an ancient name can resolve to a new occupant. `slotmap` also
 lets a plain `u64` convert into a key, and two such words can reach one entry. This crate trades
 growth for the opposite properties: a fixed array, no allocation, a `const` constructor, a
-generation that retires a slot rather than wrap, names that cannot be forged from a word, and
+generation that retires a slot rather than wrap, names that nobody can forge from a word, and
 machine-checked proofs of those claims. It costs you the capacity you choose up front and a slot
 now and then in a very long-lived table.
 

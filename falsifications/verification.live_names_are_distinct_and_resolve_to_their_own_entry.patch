@@ -9,11 +9,11 @@ Expected to fail: the harness's `assert_eq!(t.get(b).copied(), Some(b_val))`. Th
 name survives the transposition (both halves are zero), so a table that is only ever used one
 entry at a time would look correct; the second entry's name unpacks to slot 0 with generation 1
 and resolves to nothing.
-
 diff --git a/src/lib.rs b/src/lib.rs
+index fec9a86..26f3c10 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -175,7 +175,7 @@
+@@ -175,7 +175,7 @@ impl<T, const N: usize> Table<T, N> {
      const RETIRED: u32 = u32::MAX;
  
      const fn name(slot: usize, generation: u32) -> EntryName<T> {
