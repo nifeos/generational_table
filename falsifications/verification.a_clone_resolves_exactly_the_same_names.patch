@@ -1,0 +1,39 @@
+Falsifies `generational_table::verification::a_clone_resolves_exactly_the_same_names`.
+
+The defect: the hand-written clone copies the entries and the counts but starts every slot's
+generation over at 0, the shortcut of someone who reads the generations as bookkeeping a copy
+does not need. A name the original minted after a reuse then carries a generation the copy does
+not hold, and a dead name from before a reuse would resolve in the copy.
+
+Expected to fail: the harness's `assert_eq!(t.get(probe), copy.get(probe))`, on a table whose live
+slot has a nonzero generation and a name that spells it.
+diff --git a/src/lib.rs b/src/lib.rs
+index 38db79a..4461b0d 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -162,7 +162,6 @@ impl<T> fmt::Debug for EntryName<T> {
+ /// generations, so every name that resolves in the original resolves to a clone of the same entry
+ /// in the copy, and every dead name stays dead. The two tables then evolve apart. `Debug` needs
+ /// `T: Debug`; see its implementation for the format.
+-#[derive(Clone)]
+ pub struct Table<T, const N: usize> {
+     slots: [Option<T>; N],
+     /// The current generation of each slot: the one a live occupant's name carries, and the one
+@@ -372,6 +371,17 @@ impl<T, const N: usize> Table<T, N> {
+     }
+ }
+ 
++impl<T: Clone, const N: usize> Clone for Table<T, N> {
++    fn clone(&self) -> Self {
++        Self {
++            slots: self.slots.clone(),
++            generations: [0; N],
++            live: self.live,
++            top: self.top,
++        }
++    }
++}
++
+ impl<T, const N: usize> Default for Table<T, N> {
+     fn default() -> Self {
+         Self::new()
