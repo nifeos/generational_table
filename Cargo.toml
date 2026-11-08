@@ -9,6 +9,16 @@ repository = "https://github.com/nifeos/generational_table"
 readme = "README.md"
 keywords = ["no-std", "slotmap", "generational-index", "arena", "kani"]
 categories = ["no-std", "data-structures"]
+# What the package carries: the crate and the licenses. The fuzz targets, the repository's workflows,
+# hooks, process documents and lint settings stay out.
+include = [
+    "/src/**",
+    "/Cargo.toml",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE-APACHE",
+    "/LICENSE-MIT",
+]
 publish = false     # the default; the allowlist lint holds the exception (crates/publish-allowlist.txt)
 
 [dependencies]

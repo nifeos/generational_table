@@ -1,0 +1,33 @@
+# The cargo-fuzz targets, in a workspace of their own so that `cargo build` and `cargo test` at the
+# root never build them. They need nightly: `cargo +nightly fuzz run <target>`.
+
+[package]
+name = "generational_table-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.generational_table]
+path = ".."
+
+[[bin]]
+name = "generational_table_operations"
+path = "fuzz_targets/generational_table_operations.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "generational_table_names"
+path = "fuzz_targets/generational_table_names.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
