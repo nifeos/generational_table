@@ -24,6 +24,11 @@ publish = false
 
 [dependencies]
 
+# The measurements behind the documentation's figures: `cargo bench`. Standard library only.
+[[bench]]
+name = "table"
+harness = false
+
 [lints.rust]
 # `cfg(kani)` is set by the Kani model checker, which proves this crate's harnesses.
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(loom)'] }

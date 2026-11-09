@@ -12,6 +12,7 @@ use super::*;
 /// one before retirement and a retired slot included, so this holds for the 2^32nd reuse as
 /// for the first; [`a_removed_name_stays_dead_whatever_comes_after`] carries it forward.
 #[kani::proof]
+#[kani::unwind(3)]
 fn a_removed_name_never_resolves_again() {
     let mut t: Table<u8, 2> = Table::new();
     t.generations = [kani::any(), kani::any()];
@@ -36,7 +37,8 @@ fn a_removed_name_never_resolves_again() {
 
 /// A table in any state the operations can reach, for N = 2: each slot free or live, with
 /// any generation, except that a live slot is never at `RETIRED`. `live` and `top` follow
-/// from the slots, as insert and remove keep them.
+/// from the slots, as insert and remove keep them. The scan cursor is anywhere at or below the
+/// lowest slot free to take, which covers every place insert and remove leave it.
 fn any_reachable_table() -> Table<u8, 2> {
     let mut t: Table<u8, 2> = Table::new();
     for slot in 0..2 {
@@ -48,7 +50,17 @@ fn any_reachable_table() -> Table<u8, 2> {
             t.top = slot + 1;
         }
     }
+    t.scan_from = kani::any();
+    kani::assume(t.scan_from <= 2);
+    for slot in 0..2 {
+        kani::assume(slot >= t.scan_from || !can_take(&t, slot));
+    }
     t
+}
+
+/// Whether insert may fill `slot`: it is empty and not retired.
+fn can_take(t: &Table<u8, 2>, slot: usize) -> bool {
+    t.slots[slot].is_none() && t.generations[slot] != Table::<u8, 2>::RETIRED
 }
 
 /// One insert, one remove of any name, or one clear: every operation that changes a slot or a
@@ -176,6 +188,35 @@ fn contains_key_and_get_agree_on_any_name() {
     let t = any_reachable_table();
     let probe = EntryName::from_bits(kani::any());
     assert_eq!(t.contains_key(probe), t.get(probe).is_some());
+}
+
+/// Falsification: replayable `falsifications/verification.the_scan_cursor_keeps_first_fit_order.patch`
+/// The scan cursor changes what an insert reads, never which slot it fills. The induction step:
+/// from any reachable table, after any operation, the cursor is at most `N` and no slot below it is
+/// free to take, which is what [`any_reachable_table`] assumes, and the next insert fills exactly
+/// the lowest free slot a scan from slot 0 would find, or refuses exactly when there is none. So
+/// every name the table mints is the name a first-fit scan from 0 would mint.
+#[kani::proof]
+#[kani::unwind(3)]
+fn the_scan_cursor_keeps_first_fit_order() {
+    let mut t = any_reachable_table();
+    any_operation(&mut t);
+
+    assert!(t.scan_from <= 2, "the cursor passed the capacity");
+    for slot in 0..2 {
+        assert!(
+            slot >= t.scan_from || !can_take(&t, slot),
+            "a free slot sits below the cursor"
+        );
+    }
+
+    let first_fit = (0..2).find(|&slot| can_take(&t, slot));
+    let name = t.insert_with(|_| kani::any());
+    assert_eq!(
+        name.map(|name| name.to_bits() & 0xffff_ffff),
+        first_fit.map(|slot| slot as u64),
+        "the insert left first-fit order"
+    );
 }
 
 /// Falsification: replayable `falsifications/verification.live_names_are_distinct_and_resolve_to_their_own_entry.patch`

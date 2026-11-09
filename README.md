@@ -69,7 +69,7 @@ says nothing about which entry came first.
 
 ## What is proven
 
-Nine Kani harnesses prove the safety claims. Kani is a model checker that proves properties for
+Ten Kani harnesses prove the safety claims. Kani is a model checker that proves properties for
 all inputs up to a stated size. The next section says how to run them.
 
 - `a_removed_name_never_resolves_again`: from any starting generations, the last one before
@@ -90,6 +90,9 @@ all inputs up to a stated size. The next section says how to run them.
   past the highest live slot and the live count equal to the occupied slots. So every walk reports
   exactly `len` entries after any number of operations, and `iter_mut` yields the names `iter`
   does.
+- `the_scan_cursor_keeps_first_fit_order`: from any reachable two-slot table, after any
+  operation, no free slot sits below insert's scan cursor, and the next insert fills exactly the
+  slot a scan from slot 0 would. The cursor changes what insert reads, never the names it mints.
 - `a_cleared_table_resolves_no_name_it_held`: from any reachable two-slot table, `clear` leaves
   nothing to walk, and no name the table held before it resolves, even after the next insert.
 - `contains_key_and_get_agree_on_any_name`: for any `u64`, `contains_key` answers exactly what
@@ -125,7 +128,7 @@ cargo kani setup
 cargo kani
 ```
 
-A passing run ends with `Complete - 9 successfully verified harnesses, 0 failures, 9 total.` Above
+A passing run ends with `Complete - 10 successfully verified harnesses, 0 failures, 10 total.` Above
 that line it also prints compiler warnings, a list of unsupported constructs and a few checks
 marked `UNREACHABLE`. None of those is a failure; each harness's own verdict is its
 `VERIFICATION:- SUCCESSFUL` line.
@@ -152,11 +155,21 @@ The minimum Rust version is held by the weekly `msrv` job, which builds and test
 - Generations are 32-bit and saturate; they never wrap. A slot whose generation reaches
   `u32::MAX` retires and never takes an entry again, so the table's capacity shrinks by one. A slot
   retires only after 2^32 - 1 occupants. A loop that does nothing but insert and remove one entry
-  can get there in about half a minute (about 7 nanoseconds a cycle on a 2.1 gigahertz server core).
+  can get there in about half a minute. `cargo bench` measures about 8 nanoseconds a cycle in a
+  16-slot table on a 2.1 gigahertz server core, and 2^32 cycles at that rate take 34 seconds.
   A table whose every slot has retired refuses every insert for good. A program that creates
   and destroys entries without pause should treat a refused insert as a real outcome.
-- `insert_with` scans from slot 0 for the first free slot, which is O(N). `get` is O(1).
-- Storage is `[Option<T>; N]`, which spends a tag on each slot when `T` has no niche.
+- Insert takes the lowest free slot, scanning up from a cursor that no free slot sits below. An
+  insert into the slot a removal just freed costs no scan. In a 4,096-slot table whose only free
+  slot is the last, `cargo bench` measures about 10 nanoseconds for an insert and a remove.
+  The worst case is still O(N): an insert after the lowest free slot fills scans the live slots
+  above it up to the next free one. `get` is O(1).
+- Storage is two arrays, `[Option<T>; N]` and `[u32; N]`. A table takes
+  `N * (size_of::<Option<T>>() + 4)` bytes plus three words, rounded up to the alignment.
+  `Option<T>` spends a tag on each slot when `T` has no niche. On a 64-bit target,
+  `Table<u64, 256>` takes 5,144 bytes, and `Table<u32, 256>` or a table of 256 references takes
+  3,096. In `cargo bench`, one array of `(u32, Option<T>)` pairs measured no faster, and it is
+  larger for a `T` aligned to 8 bytes, so the two arrays stay.
 - Expected demand is low. Fixed-capacity tables are a small corner of the ecosystem, and this
   crate does not try to be anything else.
 
@@ -186,7 +199,7 @@ nobody can copy or clone, and `take` consumes it. The compiler therefore rejects
 removed key, which this crate checks only at run time. By default a key also records which `Slots`
 value made it and panics in another, where this crate lets a name from a second table of the same
 entry type resolve there. Its store and take run in constant time from a free list, where this
-crate's `insert_with` scans. The price is that you cannot keep a key as a plain word. `Key::index`
+crate's insert scans from its cursor. The price is that you cannot keep a key as a plain word. `Key::index`
 gives a `usize`, and `try_read` with that index reaches whatever the slot holds now, a later
 occupant included. Its `UnrestrictedSlots` type uses such indexes throughout. Its `new` is not
 `const`, it has no `unsafe` code of its own, and it depends on `array-init`. The published source

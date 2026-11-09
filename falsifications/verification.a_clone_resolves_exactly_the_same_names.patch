@@ -8,10 +8,10 @@ not hold, and a dead name from before a reuse would resolve in the copy.
 Expected to fail: the harness's `assert_eq!(t.get(probe), copy.get(probe))`, on a table whose live
 slot has a nonzero generation and a name that spells it.
 diff --git a/src/lib.rs b/src/lib.rs
-index 38db79a..4461b0d 100644
+index c22f635..f2073e3 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -162,7 +162,6 @@ impl<T> fmt::Debug for EntryName<T> {
+@@ -197,7 +197,6 @@ impl<T> fmt::Debug for EntryName<T> {
  /// generations, so every name that resolves in the original resolves to a clone of the same entry
  /// in the copy, and every dead name stays dead. The two tables then evolve apart. `Debug` needs
  /// `T: Debug`; see its implementation for the format.
@@ -19,7 +19,7 @@ index 38db79a..4461b0d 100644
  pub struct Table<T, const N: usize> {
      slots: [Option<T>; N],
      /// The current generation of each slot: the one a live occupant's name carries, and the one
-@@ -372,6 +371,17 @@ impl<T, const N: usize> Table<T, N> {
+@@ -500,6 +499,18 @@ impl<T, const N: usize> Table<T, N> {
      }
  }
  
@@ -30,6 +30,7 @@ index 38db79a..4461b0d 100644
 +            generations: [0; N],
 +            live: self.live,
 +            top: self.top,
++            scan_from: self.scan_from,
 +        }
 +    }
 +}

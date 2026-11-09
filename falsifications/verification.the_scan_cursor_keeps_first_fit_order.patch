@@ -1,0 +1,20 @@
+Falsifies `generational_table::verification::the_scan_cursor_keeps_first_fit_order`.
+
+The defect: remove frees its slot without bringing the scan cursor down to it. Insert still moves
+the cursor past every slot it fills, and a table whose removals come from the top, or that is
+refilled by a clear, behaves exactly as before; only a hole below the cursor shows it.
+
+Expected to fail: the harness's assertion that no free slot sits below the cursor, after a remove
+of a slot below it, and with it the insert that then fills a higher slot than first fit would.
+diff --git a/src/lib.rs b/src/lib.rs
+index c22f635..e47ee6f 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -348,7 +348,6 @@ impl<T, const N: usize> Table<T, N> {
+         let value = self.slots[slot].take()?;
+         self.generations[slot] = self.generations[slot].saturating_add(1);
+         self.live -= 1;
+-        self.scan_from = self.scan_from.min(slot);
+         // Removing anything below the top leaves a hole, which costs a walk nothing to skip.
+         // Removing the top one means the bound can come down, past however many holes are under it.
+         if slot + 1 == self.top {
