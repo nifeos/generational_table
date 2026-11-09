@@ -11,28 +11,24 @@ first operation fills a slot that sits at `RETIRED`; and on the second operation
 occupant, its assertion that the dead name's slot generation stays above the name's, when the
 bump wraps it to 0.
 diff --git a/src/lib.rs b/src/lib.rs
-index fec9a86..e0d48d9 100644
+index c22f635..849a2d5 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -200,11 +200,7 @@ impl<T, const N: usize> Table<T, N> {
-     /// assert!(t.insert_with(|_| 3).is_none(), "a full table refuses");
-     /// ```
-     pub fn insert_with(&mut self, f: impl FnOnce(EntryName<T>) -> T) -> Option<EntryName<T>> {
--        let slot = self
--            .slots
--            .iter()
--            .zip(&self.generations)
--            .position(|(s, &g)| s.is_none() && g != Self::RETIRED)?;
-+        let slot = self.slots.iter().position(|s| s.is_none())?;
-         let name = Self::name(slot, self.generations[slot]);
-         self.slots[slot] = Some(f(name));
-         self.live += 1;
-@@ -248,7 +244,7 @@ impl<T, const N: usize> Table<T, N> {
+@@ -287,7 +287,7 @@ impl<T, const N: usize> Table<T, N> {
+             .zip(&self.generations)
+             .enumerate()
+             .skip(self.scan_from)
+-            .find_map(|(slot, (s, &g))| (s.is_none() && g != Self::RETIRED).then_some(slot));
++            .find_map(|(slot, (s, _))| s.is_none().then_some(slot));
+         let Some(slot) = found else {
+             // Every slot from the cursor on is live or retired, as every slot below it already is.
+             self.scan_from = N;
+@@ -346,7 +346,7 @@ impl<T, const N: usize> Table<T, N> {
      pub fn remove(&mut self, name: EntryName<T>) -> Option<T> {
          let slot = self.slot_of(name)?;
          let value = self.slots[slot].take()?;
 -        self.generations[slot] = self.generations[slot].saturating_add(1);
 +        self.generations[slot] = self.generations[slot].wrapping_add(1);
          self.live -= 1;
+         self.scan_from = self.scan_from.min(slot);
          // Removing anything below the top leaves a hole, which costs a walk nothing to skip.
-         // Removing the top one means the bound can come down, past however many holes are under it.

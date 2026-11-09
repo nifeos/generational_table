@@ -8,14 +8,14 @@ Expected to fail: the harness's `assert_ne!(new_name, name)`, where the reused s
 name the dead entry had. That is a stale `ThreadId` resolving to a later occupant, which is the
 whole reason this table is generational rather than an array of `Option`.
 diff --git a/src/lib.rs b/src/lib.rs
-index fec9a86..c230a6f 100644
+index c22f635..b615f12 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -248,7 +248,6 @@ impl<T, const N: usize> Table<T, N> {
+@@ -346,7 +346,6 @@ impl<T, const N: usize> Table<T, N> {
      pub fn remove(&mut self, name: EntryName<T>) -> Option<T> {
          let slot = self.slot_of(name)?;
          let value = self.slots[slot].take()?;
 -        self.generations[slot] = self.generations[slot].saturating_add(1);
          self.live -= 1;
+         self.scan_from = self.scan_from.min(slot);
          // Removing anything below the top leaves a hole, which costs a walk nothing to skip.
-         // Removing the top one means the bound can come down, past however many holes are under it.

@@ -8,12 +8,12 @@ bounded by it misses the entry it just took.
 Expected to fail: the harness's assertion that no live entry sits above the walk bound, after an
 insert into a table whose free slot is the one at `top`.
 diff --git a/src/lib.rs b/src/lib.rs
-index 684df60..5416e1e 100644
+index c22f635..1968c34 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -237,7 +237,7 @@ impl<T, const N: usize> Table<T, N> {
-         self.slots[slot] = Some(f(name));
+@@ -298,7 +298,7 @@ impl<T, const N: usize> Table<T, N> {
          self.live += 1;
+         self.scan_from = slot + 1;
          // First-fit, so the free slot found is at most `top`, and this is the only way `top` grows.
 -        if slot >= self.top {
 +        if slot > self.top {
