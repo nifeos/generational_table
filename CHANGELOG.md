@@ -7,6 +7,8 @@ sentence beside it.
 
 - First version.
 - `Table` implements `Debug` and `Clone`, and `EntryName` implements `Hash`.
+- `Table` has `insert`, `contains_key`, `iter_mut`, `capacity` and `clear`, and `EntryName`
+  implements `PartialOrd` and `Ord` by its packed value.
 
 ## BUGS
 

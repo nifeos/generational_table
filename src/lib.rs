@@ -941,7 +941,7 @@ mod tests {
 
     /// The alternate form indents a name like any other struct.
     #[test]
-    fn a_name_pretty_prints_as_a_struct() {
+    fn a_name_pretty_prints_with_indented_fields() {
         let name = EntryName::<u8>::from_bits((3 << 32) | 5);
         assert_eq!(
             format!("{name:#?}"),
@@ -957,15 +957,15 @@ mod tests {
         struct Bare;
         let low = EntryName::<Bare>::from_bits(1 << 32);
         let high_slot = EntryName::<Bare>::from_bits(5);
-        let max = EntryName::<Bare>::NEVER_MINTED;
+        let never_minted = EntryName::<Bare>::NEVER_MINTED;
         assert!(high_slot < low, "the generation outranks the slot");
-        assert!(low < max);
+        assert!(low < never_minted);
         assert_eq!(low.cmp(&low), Ordering::Equal);
-        assert_eq!(low.partial_cmp(&max), Some(Ordering::Less));
+        assert_eq!(low.partial_cmp(&never_minted), Some(Ordering::Less));
 
-        let mut names = vec![max, low, high_slot];
+        let mut names = vec![never_minted, low, high_slot];
         names.sort();
-        assert_eq!(names, vec![high_slot, low, max]);
+        assert_eq!(names, vec![high_slot, low, never_minted]);
 
         let mut by_name = BTreeMap::new();
         by_name.insert(low, "low");
