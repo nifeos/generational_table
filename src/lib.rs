@@ -931,7 +931,7 @@ mod tests {
         assert_eq!(t.generations, [1, 1]);
     }
 
-    /// A name prints as its generation and slot,    /// A name prints as its generation and slot, and needs nothing of the entry type to do so.
+    /// A name prints as its generation and slot, and needs nothing of the entry type to do so.
     #[test]
     fn a_name_prints_its_generation_and_slot() {
         struct NotDebug;
