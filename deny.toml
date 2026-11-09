@@ -11,6 +11,8 @@ yanked = "deny"
 
 [licenses]
 version = 2
+# The template's list of permissive licenses. The crate has no dependency, so no allowance matches
+# anything, and `cargo deny` reports one of them (`Zlib`) as unmatched. The warning is expected.
 allow = [
     "MIT",
     "Apache-2.0",

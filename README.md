@@ -3,7 +3,7 @@
 [![check](https://github.com/nifeos/generational_table/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nifeos/generational_table/actions/workflows/ci.yml?query=branch%3Amain)
 [![proofs](https://github.com/nifeos/generational_table/actions/workflows/proofs.yml/badge.svg?branch=main)](https://github.com/nifeos/generational_table/actions/workflows/proofs.yml?query=branch%3Amain)
 [![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/nifeos/generational_table#license)
-[![minimum Rust version](https://img.shields.io/badge/rust-1.88%2B-blue.svg)](https://github.com/nifeos/generational_table/blob/main/Cargo.toml)
+[![minimum Rust version](https://img.shields.io/badge/rust-1.85%2B-blue.svg)](https://github.com/nifeos/generational_table/blob/main/Cargo.toml)
 
 A fixed-capacity table that names each entry with a typed `u64`, so a name outlives nothing it
 named. Removing an entry raises its slot's generation, and every copy of the old name then
@@ -70,12 +70,7 @@ says nothing about which entry came first.
 ## What is proven
 
 Nine Kani harnesses prove the safety claims. Kani is a model checker that proves properties for
-all inputs up to a stated size. The proofs need Kani, which `rustup` does not install. Run
-`cargo install --locked
-kani-verifier --version 0.68.0`, then `cargo kani setup`. The setup step
-downloads a model checker, so it needs network access. CI uses version 0.68.0, and another
-version may verify differently. After that, `cargo kani` from the crate's directory runs every
-harness.
+all inputs up to a stated size. The next section says how to run them.
 
 - `a_removed_name_never_resolves_again`: from any starting generations, the last one before
   retirement included, a removed name resolves through none of `get`, `get_mut` and `remove`,
@@ -109,6 +104,47 @@ steps. The host tests cover the rest: a name whose slot is past the table, a ret
 retired table, the hole below the walk bound, and an insert the table refuses without running its
 closure.
 
+## Building and proving
+
+From the crate's directory, with a Rust toolchain from `rustup`:
+
+```sh
+cargo build
+cargo test
+```
+
+`cargo test` runs the unit tests, the documentation tests (this README's example among them) and
+one test that must fail to compile.
+
+The proofs need Kani, which `rustup` does not install. CI uses version 0.68.0, and another version
+may verify differently. The setup step downloads a model checker, so it needs network access.
+
+```sh
+cargo install --locked kani-verifier --version 0.68.0
+cargo kani setup
+cargo kani
+```
+
+A passing run ends with `Complete - 9 successfully verified harnesses, 0 failures, 9 total.` Above
+that line it also prints compiler warnings, a list of unsupported constructs and a few checks
+marked `UNREACHABLE`. None of those is a failure; each harness's own verdict is its
+`VERIFICATION:- SUCCESSFUL` line.
+
+To watch a proof fail, apply its falsification patch, run that harness alone, then undo the patch:
+
+```sh
+git apply falsifications/verification.a_removed_name_never_resolves_again.patch
+cargo kani --harness verification::a_removed_name_never_resolves_again --exact
+git checkout -- src
+```
+
+The middle command ends with `0 successfully verified harnesses, 1 failures, 1 total.`, and the
+lines above it name the assertion that failed. CI replays every patch this way on each pull
+request.
+
+The minimum Rust version is held by the weekly `msrv` job, which builds and tests at it; locally,
+`rustup toolchain install 1.85` and then `cargo +1.85 test` do the same.
+
 ## BUGS
 
 - Capacity is fixed. `insert_with` returns `None`, without running its closure, when every slot
@@ -124,7 +160,11 @@ closure.
 - Expected demand is low. Fixed-capacity tables are a small corner of the ecosystem, and this
   crate does not try to be anything else.
 
-## How it differs from slotmap, thunderdome, slots and coca
+## How it differs from slab, slotmap, thunderdome, slots and coca
+
+`slab` is where most programs meet this shape: a `Vec` of slots, each entry named by a plain
+`usize` with no generation. An index kept after its entry is removed reaches whatever the slot
+holds next, which is the mistake this crate's names refuse.
 
 `slotmap` and `thunderdome` are the established, growable members of this family, and for most
 programs one of them is the right choice. They keep their entries in a `Vec`, so they need an
@@ -171,7 +211,7 @@ names. `generational-arena` 0.2.9 forbids `unsafe` code but keeps its entries in
 
 ## Minimum Rust version
 
-Rust 1.88.
+Rust 1.85.
 
 ## License
 

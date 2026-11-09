@@ -2,19 +2,33 @@
 //! [`EntryName<T>`], which packs `(generation, slot)` into one `u64` and carries the table's entry
 //! type, so a name minted by a table of one entry type cannot be handed to a table of another. A
 //! removal bumps the slot's generation, so a stale name is `None` forever, slot reused or not
-//! (proved below). Slots are reused, so the table stays a fixed
-//! array, while names behave as if they never were: a stale name is not a dangling reference and
-//! not somebody else's entry; it is `None`. Game engines call the same shape a slotmap.
+//! (proved below). Slots are reused, so the table stays a fixed array, while a stale name is not a
+//! dangling reference and not somebody else's entry; it is `None`. Game engines call the same shape
+//! a slotmap.
+//!
+//! ```
+//! use generational_table::{EntryName, Table};
+//!
+//! let mut sessions: Table<&str, 4> = Table::new();
+//! let alice = sessions.insert("alice").unwrap();
+//! sessions.remove(alice);
+//! let bob = sessions.insert("bob").unwrap(); // takes the slot Alice left
+//! assert_eq!(sessions.get(alice), None, "a stale name reaches nothing");
+//! // A name crosses a boundary as a plain word and comes back.
+//! assert_eq!(sessions.get(EntryName::from_bits(bob.to_bits())), Some(&"bob"));
+//! ```
 //!
 //! # Limits
 //!
+//! - `N` is between 1 and `u32::MAX`; [`Table::new`] refuses any other `N` at compile time.
+//! - The table is an array of `N` slots held inline, so a large table built as a local sits on the
+//!   stack. Put a large one in a `static`, which `new`, a `const fn`, can initialize.
 //! - Capacity is fixed: `insert_with` returns `None` when all `N` slots are live.
 //! - Generations are 32-bit and never wrap. A slot whose generation reaches `u32::MAX` retires:
 //!   it is never filled again, so the table's capacity shrinks by one. A slot retires only after
 //!   2^32 - 1 occupants of that slot. A loop that does nothing but insert and remove one entry
 //!   takes about 7 nanoseconds a cycle on a 2.1 gigahertz server core, so it retires its slot in
-//!   about half a minute; a loop that does real work per entry takes far longer. A table whose every
-//!   slot has retired refuses every insert for good.
+//!   about half a minute. A table whose every slot has retired refuses every insert for good.
 //! - Insert scans for a free slot in O(N); `get` and `get_mut` are O(1).
 //!
 //! # Traits

@@ -13,27 +13,27 @@ What a run is:
    not against the stranger.
 4. Record the date on the line below.
 
-Last run: 2026-11-08
+Last run: 2026-11-09
 
 ## What the last run did
 
-A fresh clone and the README, on a machine that already had Rust and Kani 0.68.0.
+A fresh clone and the README, on a machine that already had Rust and Kani 0.68.0. It followed the
+"Building and proving" section command by command.
 
-- `cargo build` and `cargo test` pass: 16 unit tests, 4 integration tests and 1 documentation
+- `cargo build` and `cargo test` pass: 33 unit tests, 8 documentation tests and 1 compile-fail
   test.
-- `cargo kani` verifies all five harnesses in about 26 seconds.
-- For each of the five patches under `falsifications/`, `git apply` and then
-  `cargo kani --harness <name>` fail that harness at its own assertion, and `git checkout -- .`
-  leaves the tree clean.
+- `cargo kani` ends with `Complete - 9 successfully verified harnesses, 0 failures, 9 total.`
+  after about a minute, with the warnings and `UNREACHABLE` checks the README says to expect.
+- The README's three falsification commands do what it says. `git apply` of the
+  `a_removed_name_never_resolves_again` patch, then `cargo kani --harness
+  verification::a_removed_name_never_resolves_again --exact`, ends with `0 successfully verified
+  harnesses, 1 failures, 1 total.` and names the failed assertion. `git checkout -- src` leaves
+  the tree clean.
+- At Rust 1.85, the stated minimum, `cargo test` passes as well.
 
-The run found five gaps in the README, all open:
+The run found no gap in the README. It closes the five gaps the run before it recorded: it gives
+the build and test commands, puts the Kani install command on one line, spells out the three
+commands around a patch, explains a passing run's warnings, and names the job and the commands
+that exercise the minimum Rust version.
 
-1. It gives no build or test command.
-2. It says a patch makes its harness fail but not how to apply it, how to run one harness, or how
-   to undo the patch.
-3. It does not say that a passing `cargo kani` run still prints compiler warnings, unsupported
-   constructs and an "unreachable code" check, which a newcomer can read as a failure.
-4. The Kani install command breaks across two lines inside one code span, so it copies badly.
-5. It states the minimum Rust version, 1.88, and the run built with a newer toolchain only.
-
-Result: pass, with those gaps.
+Result: pass.
