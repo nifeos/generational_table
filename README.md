@@ -65,7 +65,7 @@ only, each under its name, so the output does not grow with `N`. `EntryName<T>` 
 
 ## What is proven
 
-Six Kani harnesses prove the safety claims. Kani is a model checker that proves properties for
+Seven Kani harnesses prove the safety claims. Kani is a model checker that proves properties for
 all inputs up to a stated size. The proofs need Kani, which `rustup` does not install. Run
 `cargo install --locked
 kani-verifier --version 0.68.0`, then `cargo kani setup`. The setup step
@@ -86,14 +86,19 @@ harness.
   on the entry whose minted name is that number. Nobody can forge a name.
 - `a_clone_resolves_exactly_the_same_names`: from any reachable two-slot table, a clone and the
   original resolve any name alike, a forged one included.
+- `the_walk_bound_and_the_live_count_survive_any_operation`: the induction step for the walks.
+  From any reachable two-slot table, any operation keeps the walk bound exactly one past the
+  highest live slot and the live count equal to the occupied slots, so every walk reports exactly
+  `len` entries after any number of operations.
 - `a_bounded_walk_yields_every_live_entry`: after removing any subset of three entries, every
-  walk reports exactly `len` entries and the survivors still resolve.
+  walk, `values_mut` included, reports exactly `len` entries and the survivors still resolve.
 
 Each harness has a falsification record at `falsifications/verification.<harness>.patch`.
 Applying it makes that harness fail at its own assertion, which shows the proof checks
 something. The proofs use tables of two or three slots and operation sequences of one or two
-steps. The host tests cover the rest: a retired slot, a fully retired table, the hole below the
-walk bound, and an insert the table refuses without running its closure.
+steps. The host tests cover the rest: a name whose slot is past the table, a retired slot, a fully
+retired table, the hole below the walk bound, and an insert the table refuses without running its
+closure.
 
 ## BUGS
 
