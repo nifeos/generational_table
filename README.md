@@ -53,19 +53,23 @@ assert!(sessions.get(generational_table::EntryName::NEVER_MINTED).is_none());
 compile where a function wants another table's name. Two tables of the same entry type share a name
 type; give each its own entry type (a one-field wrapper is enough) to keep them apart.
 
-Besides `insert_with`, `get`, `get_mut` and `remove`, the table has `slot_of`, `len`,
-`is_empty`, `values`, `values_mut`, `live_slots`, `iter` (each name with its entry) and
-`iter_from` (a sweep that resumes from a slot index after you give a lock back). The walks cost
-what the table holds, not what it could hold.
+Besides `insert_with`, `get`, `get_mut` and `remove`, the table has `insert` (a value that does
+not need its own name), `contains_key`, `slot_of`, `len`, `is_empty`, `capacity` (`N`, for
+generic code), `clear` (removes every entry and kills every name it held), `values`,
+`values_mut`, `live_slots`, `iter` and `iter_mut` (each name with its entry) and `iter_from` (a
+sweep that resumes from a slot index after you give a lock back). The walks and `clear` cost what
+the table holds, not what it could hold.
 
 `Table<T, N>` implements `Clone` when `T: Clone`, and `Debug` when `T: Debug`. A clone resolves
 exactly the names the original does. `Debug` prints the length, the capacity and the live entries
 only, each under its name, so the output does not grow with `N`. `EntryName<T>` implements `Clone`,
-`Copy`, `PartialEq`, `Eq`, `Hash` and `Debug` for every `T`.
+`Copy`, `PartialEq`, `Eq`, `PartialOrd`, `Ord`, `Hash` and `Debug` for every `T`. Names order by
+their packed value, generation first and then slot, so they key a `BTreeMap` and sort; the order
+says nothing about which entry came first.
 
 ## What is proven
 
-Seven Kani harnesses prove the safety claims. Kani is a model checker that proves properties for
+Nine Kani harnesses prove the safety claims. Kani is a model checker that proves properties for
 all inputs up to a stated size. The proofs need Kani, which `rustup` does not install. Run
 `cargo install --locked
 kani-verifier --version 0.68.0`, then `cargo kani setup`. The setup step
@@ -87,9 +91,13 @@ harness.
 - `a_clone_resolves_exactly_the_same_names`: from any reachable two-slot table, a clone and the
   original resolve any name alike, a forged one included.
 - `the_walk_bound_and_the_live_count_survive_any_operation`: the induction step for the walks.
-  From any reachable two-slot table, any operation keeps the walk bound exactly one past the
+  From any reachable two-slot table, any insert, remove or clear keeps the walk bound exactly one past the
   highest live slot and the live count equal to the occupied slots, so every walk reports exactly
-  `len` entries after any number of operations.
+  `len` entries after any number of operations, and `iter_mut` yields the names `iter` does.
+- `a_cleared_table_resolves_no_name_it_held`: from any reachable two-slot table, `clear` leaves
+  nothing to walk, and no name the table held before it resolves, even after the next insert.
+- `contains_key_and_get_agree_on_any_name`: for any `u64`, `contains_key` answers exactly what
+  `get` answers.
 - `a_bounded_walk_yields_every_live_entry`: after removing any subset of three entries, every
   walk, `values_mut` included, reports exactly `len` entries and the survivors still resolve.
 

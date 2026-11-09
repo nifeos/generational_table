@@ -21,12 +21,13 @@
 //!
 //! `Table<T, N>` implements `Clone` when `T: Clone` and `Debug` when `T: Debug`. It has no
 //! `Default` beyond [`Table::new`]'s empty table, no `PartialEq` and no `Hash`. `EntryName<T>`
-//! implements `Clone`, `Copy`, `PartialEq`, `Eq`, `Hash` and `Debug` for every `T`, and no
-//! `Default`: every `u64` is a name, so there is no name to call the default.
+//! implements `Clone`, `Copy`, `PartialEq`, `Eq`, `PartialOrd`, `Ord`, `Hash` and `Debug` for
+//! every `T`, and no `Default`: every `u64` is a name, so there is no name to call the default.
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
 
+use core::cmp::Ordering;
 use core::fmt;
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
@@ -44,8 +45,9 @@ struct ReadmeExample;
 /// gives each its own entry type (a one-field wrapper is enough).
 ///
 /// `T` is only a tag. The name holds no `T` and needs nothing of it: `Copy`, `Clone`, `PartialEq`,
-/// `Eq`, `Hash` and `Debug` hold for every `T`, implemented by hand because a derive would demand them of
-/// `T`, and `Send` and `Sync` hold for every `T` because the marker is `PhantomData<fn() -> T>`.
+/// `Eq`, `PartialOrd`, `Ord`, `Hash` and `Debug` hold for every `T`, implemented by hand because a
+/// derive would demand them of `T`, and `Send` and `Sync` hold for every `T` because the marker is
+/// `PhantomData<fn() -> T>`.
 ///
 /// [`from_bits`](Self::from_bits) and [`to_bits`](Self::to_bits) cross a boundary that carries a
 /// plain word, such as a syscall register. `from_bits` is total: any `u64` makes a name, and a
@@ -117,6 +119,22 @@ impl<T> PartialEq for EntryName<T> {
 
 impl<T> Eq for EntryName<T> {}
 
+/// Orders names by their packed value: generation first, then slot, since the generation sits in
+/// the high bits. The order exists so a name can key a `BTreeMap` or sort, and it carries no
+/// meaning about insertion time: a name below another may belong to the newer entry.
+impl<T> PartialOrd for EntryName<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// By packed value, generation first and then slot, as the `PartialOrd` implementation states.
+impl<T> Ord for EntryName<T> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.bits.cmp(&other.bits)
+    }
+}
+
 impl<T> Hash for EntryName<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.bits.hash(state);
@@ -126,12 +144,10 @@ impl<T> Hash for EntryName<T> {
 /// Prints the generation and the slot, the two things a reader of a name wants.
 impl<T> fmt::Debug for EntryName<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "EntryName {{ generation: {}, slot: {} }}",
-            self.bits >> 32,
-            self.bits & 0xffff_ffff
-        )
+        f.debug_struct("EntryName")
+            .field("generation", &(self.bits >> 32))
+            .field("slot", &(self.bits & 0xffff_ffff))
+            .finish()
     }
 }
 
@@ -211,6 +227,22 @@ impl<T, const N: usize> Table<T, N> {
         (bits as u32, (bits >> 32) as u32)
     }
 
+    /// Insert `value` and return its name, or `None` if every slot is live or retired. A refused
+    /// `value` is dropped; [`insert_with`](Self::insert_with) builds the value only once a slot is
+    /// found, and hands the entry its own name.
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut t: Table<&str, 1> = Table::new();
+    /// let a = t.insert("a").unwrap();
+    /// assert_eq!(t.get(a), Some(&"a"));
+    /// assert_eq!(t.insert("b"), None, "a full table refuses");
+    /// ```
+    pub fn insert(&mut self, value: T) -> Option<EntryName<T>> {
+        self.insert_with(|_| value)
+    }
+
     /// Insert, minting the entry's name first so the entry can carry it: `f` receives the name
     /// and returns the value to store. `None` (and `f` never called) if every slot is live or
     /// retired.
@@ -267,6 +299,12 @@ impl<T, const N: usize> Table<T, N> {
         self.slots[slot].as_ref()
     }
 
+    /// Whether `name` resolves to a live entry: [`get`](Self::get) without the reference. `false`
+    /// for a removed name, a name from a previous occupant of the slot, or garbage.
+    pub fn contains_key(&self, name: EntryName<T>) -> bool {
+        self.slot_of(name).is_some()
+    }
+
     /// [`get`](Self::get), mutably.
     pub fn get_mut(&mut self, name: EntryName<T>) -> Option<&mut T> {
         let slot = self.slot_of(name)?;
@@ -297,6 +335,42 @@ impl<T, const N: usize> Table<T, N> {
             self.top = top;
         }
         Some(value)
+    }
+
+    /// Remove every entry, bumping each occupied slot's generation as
+    /// [`remove`](Self::remove) does: every name the table had minted resolves to `None` from this
+    /// moment, and the next insert into a cleared slot mints a new name. Free slots keep their
+    /// generations, and an occupant at the last generation leaves its slot retired. The cost is
+    /// what the table held, not `N`.
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut t: Table<u32, 4> = Table::new();
+    /// let a = t.insert(1).unwrap();
+    /// t.clear();
+    /// assert!(t.is_empty());
+    /// assert_eq!(t.get(a), None);
+    /// assert_ne!(t.insert(2), Some(a), "the cleared slot mints a new name");
+    /// ```
+    pub fn clear(&mut self) {
+        let top = self.top;
+        for (slot, generation) in self.slots.iter_mut().zip(&mut self.generations).take(top) {
+            if let Some(value) = slot.take() {
+                *generation = generation.saturating_add(1);
+                self.live -= 1;
+                // Dropped after the bookkeeping, so an entry whose drop panics leaves the count
+                // and the generations true.
+                drop(value);
+            }
+        }
+        self.top = 0;
+    }
+
+    /// The number of slots, `N`, live, free and retired alike: for code generic over the table's
+    /// size. A table holds at most this many entries, and fewer once a slot retires.
+    pub const fn capacity(&self) -> usize {
+        N
     }
 
     /// The number of live entries. O(1): maintained on every insert and remove rather than
@@ -339,6 +413,20 @@ impl<T, const N: usize> Table<T, N> {
     /// only needs the entry, as when each entry carries its own name.
     pub fn iter(&self) -> impl Iterator<Item = (EntryName<T>, &T)> + '_ {
         self.iter_from(0).map(|(_, name, t)| (name, t))
+    }
+
+    /// Every live entry with its current name, by mutable reference, in slot order. For sweeps
+    /// that change entries and also need each entry's name, which
+    /// [`values_mut`](Self::values_mut) does not give.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (EntryName<T>, &mut T)> + '_ {
+        let top = self.top;
+        self.slots[..top]
+            .iter_mut()
+            .zip(&self.generations)
+            .enumerate()
+            .filter_map(|(slot, (s, &generation))| {
+                s.as_mut().map(|t| (Self::name(slot, generation), t))
+            })
     }
 
     /// Every live entry from slot `from` onward, as `(slot, name, &T)`, in slot order.
@@ -709,12 +797,184 @@ mod tests {
         assert_eq!(t.insert_with(|_| 3), None, "both slots retired");
     }
 
-    /// A name prints as its generation and slot, and needs nothing of the entry type to do so.
+    /// `insert` stores the value under the name `insert_with` would have minted, and a full table
+    /// refuses it, dropping it there and then.
+    #[test]
+    fn insert_names_the_value_and_a_full_table_drops_it() {
+        use std::rc::Rc;
+        let mut t: Table<Rc<u32>, 2> = Table::new();
+        let a = t.insert(Rc::new(1)).unwrap();
+        assert_eq!(a, EntryName::from_bits(0));
+        let b = t.insert(Rc::new(2)).unwrap();
+        assert_eq!(t.get(b).map(|v| **v), Some(2));
+        assert_eq!(t.len(), 2);
+
+        let refused = Rc::new(3);
+        assert_eq!(t.insert(Rc::clone(&refused)), None);
+        assert_eq!(Rc::strong_count(&refused), 1, "the refused value was kept");
+        assert_eq!(t.len(), 2);
+    }
+
+    /// `contains_key` answers exactly what `get` answers.
+    #[test]
+    fn contains_key_holds_for_live_names_only() {
+        let mut t: Table<u32, 2> = Table::new();
+        let a = t.insert(1).unwrap();
+        let b = t.insert(2).unwrap();
+        assert!(t.contains_key(a) && t.contains_key(b));
+        t.remove(a);
+        assert!(!t.contains_key(a), "a removed name is still a key");
+        assert!(t.contains_key(b));
+        let c = t.insert(3).unwrap();
+        assert!(t.contains_key(c) && !t.contains_key(a));
+        assert!(!t.contains_key(EntryName::NEVER_MINTED));
+        assert!(!t.contains_key(EntryName::from_bits(99)));
+    }
+
+    /// `iter_mut` pairs each live entry with the name that resolves to it, skips holes, and a
+    /// write through it lands in that entry.
+    #[test]
+    fn iter_mut_yields_each_live_name_and_writes_through() {
+        let mut t: Table<u32, 4> = Table::new();
+        let a = t.insert(10).unwrap();
+        let b = t.insert(20).unwrap();
+        let c = t.insert(30).unwrap();
+        t.remove(b);
+
+        let mut seen = Vec::new();
+        for (name, value) in t.iter_mut() {
+            seen.push(name);
+            *value += 1;
+        }
+        assert_eq!(seen, vec![a, c]);
+        assert_eq!(t.get(a), Some(&11));
+        assert_eq!(t.get(c), Some(&31));
+        assert_eq!(t.get(b), None);
+        assert_eq!(
+            t.iter().map(|(n, v)| (n, *v)).collect::<Vec<_>>(),
+            vec![(a, 11), (c, 31)]
+        );
+    }
+
+    /// `capacity` is `N` whatever the table holds.
+    #[test]
+    fn capacity_is_the_slot_count() {
+        let mut t: Table<u32, 3> = Table::new();
+        assert_eq!(t.capacity(), 3);
+        t.insert(1).unwrap();
+        assert_eq!(t.capacity(), 3);
+        assert_eq!(Table::<u8, 1>::new().capacity(), 1);
+    }
+
+    /// `clear` empties the table, kills every name it held, brings the walk bound to zero, and
+    /// leaves each cleared slot to mint a fresh name. Free slots keep their generations.
+    #[test]
+    fn clear_kills_every_name_and_empties_every_walk() {
+        let mut t: Table<u32, 4> = Table::new();
+        let a = t.insert(1).unwrap();
+        let b = t.insert(2).unwrap();
+        let c = t.insert(3).unwrap();
+        t.remove(b);
+        t.generations[3] = 7;
+        t.clear();
+
+        assert!(t.is_empty());
+        assert_eq!(t.top, 0, "a cleared table still walks slots");
+        assert_eq!(t.values().count(), 0);
+        for name in [a, b, c] {
+            assert!(t.get(name).is_none(), "a name survived clear");
+        }
+        assert_eq!(t.generations, [1, 1, 1, 7], "only occupied slots move");
+
+        let again = t.insert(4).unwrap();
+        assert_ne!(again, a);
+        assert_eq!(again.to_bits(), 1 << 32, "slot 0 at its next generation");
+        assert_eq!(t.len(), 1);
+    }
+
+    /// The last occupant a slot takes leaves it retired through `clear` as through `remove`.
+    #[test]
+    fn clear_retires_a_slot_at_its_last_generation() {
+        let mut t: Table<u32, 2> = Table::new();
+        t.generations[0] = Table::<u32, 2>::RETIRED - 1;
+        let last = t.insert(1).unwrap();
+        t.clear();
+        assert_eq!(t.generations[0], Table::<u32, 2>::RETIRED);
+        assert!(t.get(last).is_none());
+        let next = t.insert(2).unwrap();
+        assert_eq!(
+            next.to_bits() & 0xffff_ffff,
+            1,
+            "a retired slot was filled again"
+        );
+    }
+
+    /// An entry whose drop panics during `clear` leaves the count and the generations true for
+    /// what was already taken.
+    #[test]
+    fn a_panicking_drop_in_clear_keeps_the_count_true() {
+        struct Loud(bool);
+        impl Drop for Loud {
+            fn drop(&mut self) {
+                if self.0 {
+                    panic!("loud drop");
+                }
+            }
+        }
+        let mut t: Table<Loud, 2> = Table::new();
+        let quiet = t.insert(Loud(false)).unwrap();
+        let loud = t.insert(Loud(true)).unwrap();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| t.clear()));
+        assert!(result.is_err());
+        assert_eq!(t.len(), 0);
+        assert!(t.get(quiet).is_none() && t.get(loud).is_none());
+        assert_eq!(t.generations, [1, 1]);
+    }
+
+    /// A name prints as its generation and slot,    /// A name prints as its generation and slot, and needs nothing of the entry type to do so.
     #[test]
     fn a_name_prints_its_generation_and_slot() {
         struct NotDebug;
         let name = EntryName::<NotDebug>::from_bits((3 << 32) | 5);
         assert_eq!(format!("{name:?}"), "EntryName { generation: 3, slot: 5 }");
+    }
+
+    /// The alternate form indents a name like any other struct.
+    #[test]
+    fn a_name_pretty_prints_as_a_struct() {
+        let name = EntryName::<u8>::from_bits((3 << 32) | 5);
+        assert_eq!(
+            format!("{name:#?}"),
+            "EntryName {\n    generation: 3,\n    slot: 5,\n}"
+        );
+    }
+
+    /// Names order by their packed value, so they key a `BTreeMap` and sort, and nothing of the
+    /// entry type is needed for either.
+    #[test]
+    fn names_order_by_packed_value_without_bounds_on_the_entry() {
+        use std::collections::BTreeMap;
+        struct Bare;
+        let low = EntryName::<Bare>::from_bits(1 << 32);
+        let high_slot = EntryName::<Bare>::from_bits(5);
+        let max = EntryName::<Bare>::NEVER_MINTED;
+        assert!(high_slot < low, "the generation outranks the slot");
+        assert!(low < max);
+        assert_eq!(low.cmp(&low), Ordering::Equal);
+        assert_eq!(low.partial_cmp(&max), Some(Ordering::Less));
+
+        let mut names = vec![max, low, high_slot];
+        names.sort();
+        assert_eq!(names, vec![high_slot, low, max]);
+
+        let mut by_name = BTreeMap::new();
+        by_name.insert(low, "low");
+        by_name.insert(high_slot, "high slot");
+        assert_eq!(by_name.get(&low), Some(&"low"));
+        assert_eq!(
+            by_name.keys().copied().collect::<Vec<_>>(),
+            vec![high_slot, low]
+        );
     }
 
     /// A name hashes and compares by its bits, and needs nothing of the entry type.
