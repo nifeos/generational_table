@@ -12,6 +12,7 @@ use super::*;
 /// one before retirement and a retired slot included, so this holds for the 2^32nd reuse as
 /// for the first; [`a_removed_name_stays_dead_whatever_comes_after`] carries it forward.
 #[kani::proof]
+#[kani::unwind(3)]
 fn a_removed_name_never_resolves_again() {
     let mut t: Table<u8, 2> = Table::new();
     t.generations = [kani::any(), kani::any()];
