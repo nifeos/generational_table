@@ -52,13 +52,13 @@ fn any_reachable_table() -> Table<u8, 2> {
     t.scan_from = kani::any();
     kani::assume(t.scan_from <= 2);
     for slot in 0..2 {
-        kani::assume(slot >= t.scan_from || !free_to_take(&t, slot));
+        kani::assume(slot >= t.scan_from || !can_take(&t, slot));
     }
     t
 }
 
-/// Whether insert may fill `slot`: empty and not retired.
-fn free_to_take(t: &Table<u8, 2>, slot: usize) -> bool {
+/// Whether insert may fill `slot`: it is empty and not retired.
+fn can_take(t: &Table<u8, 2>, slot: usize) -> bool {
     t.slots[slot].is_none() && t.generations[slot] != Table::<u8, 2>::RETIRED
 }
 
@@ -204,12 +204,12 @@ fn the_scan_cursor_keeps_first_fit_order() {
     assert!(t.scan_from <= 2, "the cursor passed the capacity");
     for slot in 0..2 {
         assert!(
-            slot >= t.scan_from || !free_to_take(&t, slot),
+            slot >= t.scan_from || !can_take(&t, slot),
             "a free slot sits below the cursor"
         );
     }
 
-    let first_fit = (0..2).find(|&slot| free_to_take(&t, slot));
+    let first_fit = (0..2).find(|&slot| can_take(&t, slot));
     let name = t.insert_with(|_| kani::any());
     assert_eq!(
         name.map(|name| name.to_bits() & 0xffff_ffff),

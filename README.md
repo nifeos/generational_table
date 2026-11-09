@@ -152,21 +152,21 @@ The minimum Rust version is held by the weekly `msrv` job, which builds and test
 - Generations are 32-bit and saturate; they never wrap. A slot whose generation reaches
   `u32::MAX` retires and never takes an entry again, so the table's capacity shrinks by one. A slot
   retires only after 2^32 - 1 occupants. A loop that does nothing but insert and remove one entry
-  can get there in about half a minute: `cargo bench` measures about 8 nanoseconds a cycle in a
+  can get there in about half a minute. `cargo bench` measures about 8 nanoseconds a cycle in a
   16-slot table on a 2.1 gigahertz server core, and 2^32 cycles at that rate take 34 seconds.
   A table whose every slot has retired refuses every insert for good. A program that creates
   and destroys entries without pause should treat a refused insert as a real outcome.
 - Insert takes the lowest free slot, scanning up from a cursor that no free slot sits below. An
-  insert into the slot a removal just freed costs no scan, and `cargo bench` measures about 10
-  nanoseconds for an insert and a remove in a 4,096-slot table whose only free slot is the last.
+  insert into the slot a removal just freed costs no scan. In a 4,096-slot table whose only free
+  slot is the last, `cargo bench` measures about 10 nanoseconds for an insert and a remove.
   The worst case is still O(N): an insert after the lowest free slot fills scans the live slots
   above it up to the next free one. `get` is O(1).
-- Storage is two arrays, `[Option<T>; N]` and `[u32; N]`, so a table takes
+- Storage is two arrays, `[Option<T>; N]` and `[u32; N]`. A table takes
   `N * (size_of::<Option<T>>() + 4)` bytes plus three words, rounded up to the alignment.
-  `Option<T>` spends a tag on each slot when `T` has no niche: `Table<u64, 256>` takes 5,144 bytes
-  on a 64-bit target, and `Table<u32, 256>` or a table of 256 references 3,096. One array of
-  `(u32, Option<T>)` pairs measured no faster in `cargo bench` and is larger for a `T` aligned to 8
-  bytes, so the two arrays stay.
+  `Option<T>` spends a tag on each slot when `T` has no niche. On a 64-bit target,
+  `Table<u64, 256>` takes 5,144 bytes, and `Table<u32, 256>` or a table of 256 references takes
+  3,096. In `cargo bench`, one array of `(u32, Option<T>)` pairs measured no faster, and it is
+  larger for a `T` aligned to 8 bytes, so the two arrays stay.
 - Expected demand is low. Fixed-capacity tables are a small corner of the ecosystem, and this
   crate does not try to be anything else.
 
