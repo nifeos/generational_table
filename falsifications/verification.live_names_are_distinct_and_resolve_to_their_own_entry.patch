@@ -10,10 +10,10 @@ name survives the transposition (both halves are zero), so a table that is only 
 entry at a time would look correct; the second entry's name unpacks to slot 0 with generation 1
 and resolves to nothing.
 diff --git a/src/lib.rs b/src/lib.rs
-index fec9a86..26f3c10 100644
+index 684df60..0b36a05 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -175,7 +175,7 @@ impl<T, const N: usize> Table<T, N> {
+@@ -201,7 +201,7 @@ impl<T, const N: usize> Table<T, N> {
      const RETIRED: u32 = u32::MAX;
  
      const fn name(slot: usize, generation: u32) -> EntryName<T> {
@@ -21,4 +21,4 @@ index fec9a86..26f3c10 100644
 +        EntryName::from_bits(((slot as u64) << 32) | generation as u64)
      }
  
-     const fn unpack(name: EntryName<T>) -> (usize, u32) {
+     /// The slot and the generation a name spells, each as the 32 bits it holds. The slot stays a

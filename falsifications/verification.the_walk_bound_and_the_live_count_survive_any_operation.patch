@@ -1,0 +1,22 @@
+Falsifies `generational_table::verification::the_walk_bound_and_the_live_count_survive_any_operation`.
+
+The defect: insert raises the walk bound only when the slot it fills is strictly above it, an off
+by one in the one place the bound grows. First-fit fills the slot at `top` whenever every slot
+below it is live, so a table filled from empty never raises its bound past zero, and every walk
+bounded by it misses the entry it just took.
+
+Expected to fail: the harness's assertion that no live entry sits above the walk bound, after an
+insert into a table whose free slot is the one at `top`.
+diff --git a/src/lib.rs b/src/lib.rs
+index 684df60..5416e1e 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -237,7 +237,7 @@ impl<T, const N: usize> Table<T, N> {
+         self.slots[slot] = Some(f(name));
+         self.live += 1;
+         // First-fit, so the free slot found is at most `top`, and this is the only way `top` grows.
+-        if slot >= self.top {
++        if slot > self.top {
+             self.top = slot + 1;
+         }
+         Some(name)
