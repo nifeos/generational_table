@@ -283,7 +283,7 @@ impl<T, const N: usize> Table<T, N> {
         self.slots[slot] = Some(f(name));
         self.live += 1;
         // First-fit, so the free slot found is at most `top`, and this is the only way `top` grows.
-        if slot > self.top {
+        if slot >= self.top {
             self.top = slot + 1;
         }
         Some(name)
