@@ -2,7 +2,7 @@
 name = "generational_table"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.85"
 description = "A fixed-capacity, allocation-free generational table (a slotmap) with Kani-proven stale-name safety"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/nifeos/generational_table"
@@ -19,7 +19,8 @@ include = [
     "/LICENSE-APACHE",
     "/LICENSE-MIT",
 ]
-publish = false     # the default; the allowlist lint holds the exception (crates/publish-allowlist.txt)
+# Held off crates.io until the first release; the release that publishes removes this line.
+publish = false
 
 [dependencies]
 
