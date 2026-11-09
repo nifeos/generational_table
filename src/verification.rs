@@ -146,6 +146,7 @@ fn the_walk_bound_and_the_live_count_survive_any_operation() {
 /// insert takes is never named like an entry the table held before the clear: the cleared slot's
 /// generation moved, as a removal moves it.
 #[kani::proof]
+#[kani::unwind(3)]
 fn a_cleared_table_resolves_no_name_it_held() {
     let mut t = any_reachable_table();
     let probe = EntryName::from_bits(kani::any());
