@@ -9,6 +9,8 @@ sentence beside it.
 - `Table` implements `Debug` and `Clone`, and `EntryName` implements `Hash`.
 - `Table` has `insert`, `contains_key`, `iter_mut`, `capacity` and `clear`, and `EntryName`
   implements `PartialOrd` and `Ord` by its packed value.
+- Insert scans from a cursor below which no slot is free, rather than from slot 0, so refilling
+  a freed slot costs no scan; `cargo bench` reproduces the figures the documentation states.
 
 ## BUGS
 
