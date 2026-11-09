@@ -69,7 +69,7 @@ says nothing about which entry came first.
 
 ## What is proven
 
-Nine Kani harnesses prove the safety claims. Kani is a model checker that proves properties for
+Ten Kani harnesses prove the safety claims. Kani is a model checker that proves properties for
 all inputs up to a stated size. The next section says how to run them.
 
 - `a_removed_name_never_resolves_again`: from any starting generations, the last one before
@@ -90,6 +90,9 @@ all inputs up to a stated size. The next section says how to run them.
   past the highest live slot and the live count equal to the occupied slots. So every walk reports
   exactly `len` entries after any number of operations, and `iter_mut` yields the names `iter`
   does.
+- `the_scan_cursor_keeps_first_fit_order`: from any reachable two-slot table, after any
+  operation, no free slot sits below insert's scan cursor, and the next insert fills exactly the
+  slot a scan from slot 0 would. The cursor changes what insert reads, never the names it mints.
 - `a_cleared_table_resolves_no_name_it_held`: from any reachable two-slot table, `clear` leaves
   nothing to walk, and no name the table held before it resolves, even after the next insert.
 - `contains_key_and_get_agree_on_any_name`: for any `u64`, `contains_key` answers exactly what
@@ -125,7 +128,7 @@ cargo kani setup
 cargo kani
 ```
 
-A passing run ends with `Complete - 9 successfully verified harnesses, 0 failures, 9 total.` Above
+A passing run ends with `Complete - 10 successfully verified harnesses, 0 failures, 10 total.` Above
 that line it also prints compiler warnings, a list of unsupported constructs and a few checks
 marked `UNREACHABLE`. None of those is a failure; each harness's own verdict is its
 `VERIFICATION:- SUCCESSFUL` line.
