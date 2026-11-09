@@ -74,6 +74,7 @@ fn any_operation(t: &mut Table<u8, 2>) {
 /// reused 2^32 times cannot bring an old name back. Two operations, not one, because a
 /// wrapping table needs an insert and a remove to come round.
 #[kani::proof]
+#[kani::unwind(3)]
 fn a_removed_name_stays_dead_whatever_comes_after() {
     let mut t = any_reachable_table();
     let slot: usize = kani::any();
