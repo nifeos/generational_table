@@ -9,13 +9,13 @@ Expected to fail: the harness's `assert_eq!(Some(probe), minted)`, on any u64 wh
 a live slot index and whose high half is anything at all. A name may come from an untrusted
 caller, so this is the forging case: the table would resolve a number nobody was ever issued.
 diff --git a/src/lib.rs b/src/lib.rs
-index fec9a86..829bfbb 100644
+index 684df60..05f994a 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -222,9 +222,7 @@ impl<T, const N: usize> Table<T, N> {
-     /// that proves a stale name never resolves proves it for `slot_of` too.
-     pub fn slot_of(&self, name: EntryName<T>) -> Option<usize> {
-         let (slot, generation) = Self::unpack(name);
+@@ -253,9 +253,7 @@ impl<T, const N: usize> Table<T, N> {
+         // A slot the target's `usize` cannot hold is no slot of any table there, so it resolves to
+         // nothing rather than truncating onto a low slot that some live entry may hold.
+         let slot = usize::try_from(slot).ok()?;
 -        if *self.generations.get(slot)? != generation {
 -            return None;
 -        }

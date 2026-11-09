@@ -102,6 +102,7 @@ fn a_removed_name_stays_dead_whatever_comes_after() {
 /// any number of operations, and every walk bounded by `top` reports exactly `len` entries, not
 /// only after the fixed sequence of [`a_bounded_walk_yields_every_live_entry`].
 #[kani::proof]
+#[kani::unwind(3)]
 fn the_walk_bound_and_the_live_count_survive_any_operation() {
     let mut t = any_reachable_table();
     any_operation(&mut t);
