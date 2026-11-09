@@ -26,10 +26,11 @@
 //! - Capacity is fixed: `insert_with` returns `None` when all `N` slots are live.
 //! - Generations are 32-bit and never wrap. A slot whose generation reaches `u32::MAX` retires:
 //!   it is never filled again, so the table's capacity shrinks by one. A slot retires only after
-//!   2^32 - 1 occupants of that slot. A loop that does nothing but insert and remove one entry
-//!   takes about 7 nanoseconds a cycle on a 2.1 gigahertz server core, so it retires its slot in
-//!   about half a minute. A table whose every slot has retired refuses every insert for good.
-//! - Insert scans for a free slot in O(N); `get` and `get_mut` are O(1).
+//!   2^32 - 1 occupants of that slot; a loop of nothing but one insert and one remove, about 8
+//!   nanoseconds a cycle (`cargo bench`, a 2.1 gigahertz server core), gets there in about half a
+//!   minute. A table whose every slot has retired refuses every insert for good.
+//! - Insert takes the lowest free slot, scanning up from a cursor no free slot sits below: no
+//!   scan to refill a slot a removal just freed, O(N) at worst. `get` and `get_mut` are O(1).
 //!
 //! # Traits
 //!
@@ -959,6 +960,66 @@ mod tests {
         assert_eq!(t.len(), 0);
         assert!(t.get(quiet).is_none() && t.get(loud).is_none());
         assert_eq!(t.generations, [1, 1]);
+    }
+
+    /// The scan cursor follows every operation: insert moves it past the slot it fills, remove
+    /// brings it down to the slot it frees, a refused insert parks it at `N`, and clear sends it
+    /// back to 0. First-fit order holds throughout.
+    #[test]
+    fn the_scan_cursor_follows_every_operation() {
+        let mut t: Table<u32, 4> = Table::new();
+        let names: Vec<_> = (0..4).map(|i| t.insert(i).unwrap()).collect();
+        assert_eq!(t.scan_from, 4);
+        assert_eq!(t.insert(9), None);
+        assert_eq!(t.scan_from, 4, "a refused insert moved the cursor");
+
+        t.remove(names[2]);
+        assert_eq!(t.scan_from, 2);
+        t.remove(names[3]);
+        assert_eq!(t.scan_from, 2, "a higher removal raised the cursor");
+        t.remove(names[1]);
+        assert_eq!(t.scan_from, 1);
+
+        let refilled = t.insert(5).unwrap();
+        assert_eq!(refilled.to_bits() & 0xffff_ffff, 1, "first fit is slot 1");
+        assert_eq!(t.scan_from, 2);
+        t.clear();
+        assert_eq!(t.scan_from, 0);
+    }
+
+    /// A refused insert parks the cursor at `N`, so every later refusal reads no slot.
+    #[test]
+    fn a_refused_insert_parks_the_cursor_at_the_end() {
+        let mut t: Table<u32, 3> = Table::new();
+        t.generations = [Table::<u32, 3>::RETIRED, 0, Table::<u32, 3>::RETIRED];
+        let only = t.insert(1).unwrap();
+        assert_eq!(t.scan_from, 2);
+        assert_eq!(t.insert(2), None);
+        assert_eq!(t.scan_from, 3);
+        t.remove(only);
+        assert_eq!(t.scan_from, 1);
+        assert_eq!(t.insert(3).map(|n| n.to_bits() & 0xffff_ffff), Some(1));
+    }
+
+    /// The table's size is `N * (size_of::<Option<T>>() + 4)` plus three words (the live count,
+    /// the walk bound and the scan cursor), rounded up to the alignment. The `Option` tag is the
+    /// whole difference between a `T` without a niche and one with.
+    #[test]
+    fn the_table_size_is_the_slots_the_generations_and_three_words() {
+        const WORDS: usize = 3 * size_of::<usize>();
+        assert_eq!(size_of::<Option<u64>>(), 16, "u64 has no niche");
+        assert_eq!(size_of::<Table<u64, 256>>(), 256 * (16 + 4) + WORDS);
+        assert_eq!(size_of::<Option<u32>>(), 8);
+        assert_eq!(size_of::<Table<u32, 256>>(), 256 * (8 + 4) + WORDS);
+        assert_eq!(
+            size_of::<Option<&u8>>(),
+            size_of::<&u8>(),
+            "a reference has a niche"
+        );
+        assert_eq!(
+            size_of::<Table<&u8, 256>>(),
+            256 * (size_of::<&u8>() + 4) + WORDS
+        );
     }
 
     /// A name prints as its generation and slot, and needs nothing of the entry type to do so.
