@@ -1,0 +1,21 @@
+Falsifies `generational_table::verification::a_cleared_table_resolves_no_name_it_held`.
+
+The defect: `clear` empties each slot without bumping its generation. Emptying is what a reader
+expects a clear to do, and every lookup on the cleared table still answers `None`, because every
+slot is empty; only the next insert shows the difference.
+
+Expected to fail: the harness's `assert_ne!(next, Some(probe), ...)`, whenever the name was live
+before the clear and the next insert takes its slot: the slot mints the cleared entry's name
+again, so a name the caller still holds reaches the new occupant.
+diff --git a/src/lib.rs b/src/lib.rs
+index 2214a94..ca78fa6 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -357,7 +357,6 @@ impl<T, const N: usize> Table<T, N> {
+         let top = self.top;
+         for (slot, generation) in self.slots.iter_mut().zip(&mut self.generations).take(top) {
+             if let Some(value) = slot.take() {
+-                *generation = generation.saturating_add(1);
+                 self.live -= 1;
+                 // Dropped after the bookkeeping, so an entry whose drop panics leaves the count
+                 // and the generations true.

@@ -51,12 +51,17 @@ fn any_reachable_table() -> Table<u8, 2> {
     t
 }
 
-/// One insert or one remove of any name, the two operations that change generations.
+/// One insert, one remove of any name, or one clear: every operation that changes a slot or a
+/// generation.
 fn any_operation(t: &mut Table<u8, 2>) {
-    if kani::any() {
-        let _ = t.insert_with(|_| kani::any());
-    } else {
-        let _ = t.remove(EntryName::from_bits(kani::any()));
+    match kani::any::<u8>() {
+        0 => {
+            let _ = t.insert_with(|_| kani::any());
+        }
+        1 => t.clear(),
+        _ => {
+            let _ = t.remove(EntryName::from_bits(kani::any()));
+        }
     }
 }
 
@@ -69,6 +74,7 @@ fn any_operation(t: &mut Table<u8, 2>) {
 /// reused 2^32 times cannot bring an old name back. Two operations, not one, because a
 /// wrapping table needs an insert and a remove to come round.
 #[kani::proof]
+#[kani::unwind(3)]
 fn a_removed_name_stays_dead_whatever_comes_after() {
     let mut t = any_reachable_table();
     let slot: usize = kani::any();
@@ -125,6 +131,51 @@ fn the_walk_bound_and_the_live_count_survive_any_operation() {
     assert_eq!(t.values_mut().count(), t.len());
     assert_eq!(t.live_slots().count(), t.len());
     assert_eq!(t.iter_from(0).count(), t.len());
+
+    // `iter_mut` walks the same entries under the same names as `iter`.
+    let mut names = [None; 2];
+    for (i, (name, _)) in t.iter_mut().enumerate() {
+        names[i] = Some(name);
+    }
+    let mut shared = t.iter().map(|(name, _)| name);
+    assert_eq!(names, [shared.next(), shared.next()]);
+}
+
+/// Falsification: replayable `falsifications/verification.a_cleared_table_resolves_no_name_it_held.patch`
+/// Clear kills every name the table held, for good. From any reachable table and any name, after
+/// `clear` the table is empty and walks nothing, the name resolves nowhere, and the entry the next
+/// insert takes is never named like an entry the table held before the clear: the cleared slot's
+/// generation moved, as a removal moves it.
+#[kani::proof]
+#[kani::unwind(3)]
+fn a_cleared_table_resolves_no_name_it_held() {
+    let mut t = any_reachable_table();
+    let probe = EntryName::from_bits(kani::any());
+    let was_live = t.contains_key(probe);
+    kani::cover!(was_live, "a live name before the clear");
+
+    t.clear();
+    assert!(t.is_empty());
+    assert_eq!(t.top, 0, "a cleared table still walks slots");
+    assert!(t.slots.iter().all(Option::is_none));
+    assert!(t.get(probe).is_none());
+
+    let next = t.insert_with(|_| kani::any());
+    if was_live {
+        assert_ne!(next, Some(probe), "a cleared name came back");
+    }
+    assert!(!t.contains_key(probe) || !was_live);
+}
+
+/// Falsification: replayable `falsifications/verification.contains_key_and_get_agree_on_any_name.patch`
+/// `contains_key` is `get` without the reference: from any reachable table, for any `u64` at all,
+/// the two agree, so membership inherits every refusal `get` is proved to make (a removed name, a
+/// previous occupant's name, a forged word).
+#[kani::proof]
+fn contains_key_and_get_agree_on_any_name() {
+    let t = any_reachable_table();
+    let probe = EntryName::from_bits(kani::any());
+    assert_eq!(t.contains_key(probe), t.get(probe).is_some());
 }
 
 /// Falsification: replayable `falsifications/verification.live_names_are_distinct_and_resolve_to_their_own_entry.patch`
