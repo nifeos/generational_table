@@ -211,6 +211,11 @@ pub struct Table<T, const N: usize> {
     /// keeps it near [`len`](Self::len), and [`remove`](Self::remove) brings it down in amortized
     /// O(1): a step down happens at most once per slot that was filled and freed.
     top: usize,
+    /// Where the next insert's scan starts. No slot below it is free to take: each is live or
+    /// retired. Insert moves it past the slot it fills, and remove brings it down to the slot it
+    /// frees, so the scan finds the same first free slot a scan from 0 would, without reading the
+    /// full slots below it.
+    scan_from: usize,
 }
 
 impl<T, const N: usize> Table<T, N> {
@@ -223,6 +228,7 @@ impl<T, const N: usize> Table<T, N> {
             generations: [0; N],
             live: 0,
             top: 0,
+            scan_from: 0,
         }
     }
 
@@ -274,14 +280,22 @@ impl<T, const N: usize> Table<T, N> {
     /// assert!(t.insert_with(|_| 3).is_none(), "a full table refuses");
     /// ```
     pub fn insert_with(&mut self, f: impl FnOnce(EntryName<T>) -> T) -> Option<EntryName<T>> {
-        let slot = self
+        let found = self
             .slots
             .iter()
             .zip(&self.generations)
-            .position(|(s, &g)| s.is_none() && g != Self::RETIRED)?;
+            .enumerate()
+            .skip(self.scan_from)
+            .find_map(|(slot, (s, &g))| (s.is_none() && g != Self::RETIRED).then_some(slot));
+        let Some(slot) = found else {
+            // Every slot from the cursor on is live or retired, as every slot below it already is.
+            self.scan_from = N;
+            return None;
+        };
         let name = Self::name(slot, self.generations[slot]);
         self.slots[slot] = Some(f(name));
         self.live += 1;
+        self.scan_from = slot + 1;
         // First-fit, so the free slot found is at most `top`, and this is the only way `top` grows.
         if slot >= self.top {
             self.top = slot + 1;
@@ -333,6 +347,7 @@ impl<T, const N: usize> Table<T, N> {
         let value = self.slots[slot].take()?;
         self.generations[slot] = self.generations[slot].saturating_add(1);
         self.live -= 1;
+        self.scan_from = self.scan_from.min(slot);
         // Removing anything below the top leaves a hole, which costs a walk nothing to skip.
         // Removing the top one means the bound can come down, past however many holes are under it.
         if slot + 1 == self.top {
@@ -379,6 +394,7 @@ impl<T, const N: usize> Table<T, N> {
             }
         }
         self.top = 0;
+        self.scan_from = 0;
     }
 
     /// The number of slots, `N`, live, free and retired alike: for code generic over the table's
