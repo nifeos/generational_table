@@ -53,6 +53,10 @@ struct ReadmeExample;
 /// `a_name_the_table_never_minted_resolves_to_nothing` proves. So a name is a claim the table
 /// checks at every use, never a reference it trusts.
 ///
+/// The slot is checked whole on every target. On a target whose `usize` is narrower than 32 bits, a
+/// name whose slot that `usize` cannot hold resolves to nothing; its high bits are never dropped
+/// to reach a lower slot.
+///
 /// A fresh table's first insert is named `from_bits(0)`. No table ever mints
 /// [`NEVER_MINTED`](Self::NEVER_MINTED), so a caller may store it as "no entry".
 ///
@@ -200,9 +204,11 @@ impl<T, const N: usize> Table<T, N> {
         EntryName::from_bits(((generation as u64) << 32) | slot as u64)
     }
 
-    const fn unpack(name: EntryName<T>) -> (usize, u32) {
+    /// The slot and the generation a name spells, each as the 32 bits it holds. The slot stays a
+    /// `u32` here because a `usize` narrower than 32 bits cannot hold every slot a word spells.
+    const fn unpack(name: EntryName<T>) -> (u32, u32) {
         let bits = name.to_bits();
-        ((bits & 0xffff_ffff) as usize, (bits >> 32) as u32)
+        (bits as u32, (bits >> 32) as u32)
     }
 
     /// Insert, minting the entry's name first so the entry can carry it: `f` receives the name
@@ -244,6 +250,9 @@ impl<T, const N: usize> Table<T, N> {
     /// that proves a stale name never resolves proves it for `slot_of` too.
     pub fn slot_of(&self, name: EntryName<T>) -> Option<usize> {
         let (slot, generation) = Self::unpack(name);
+        // A slot the target's `usize` cannot hold is no slot of any table there, so it resolves to
+        // nothing rather than truncating onto a low slot that some live entry may hold.
+        let slot = usize::try_from(slot).ok()?;
         if *self.generations.get(slot)? != generation {
             return None;
         }
@@ -651,6 +660,26 @@ mod tests {
         assert_eq!(t.get(EntryName::from_bits(99)), None); // no such slot
         assert_eq!(t.get(EntryName::from_bits(1 << 32)), None); // slot 0, wrong generation
         assert_eq!(t.get(EntryName::NEVER_MINTED), None);
+    }
+
+    /// A name whose slot is past the table resolves to nothing, however its bits sit. Slot
+    /// `0x1_0000` with slot 0's live generation is the name a 16-bit `usize` would truncate onto
+    /// slot 0, and the largest slot is the one no target can hold in 16 bits.
+    #[test]
+    fn a_name_whose_slot_is_past_the_table_resolves_to_nothing() {
+        let mut t: Table<u32, 2> = Table::new();
+        let first = t.insert_with(|_| 7).unwrap();
+        for high_slot in [0x1_0000, 0x1_0001, 0xffff_ffff] {
+            let past = EntryName::from_bits(first.to_bits() | high_slot);
+            assert_eq!(t.slot_of(past), None, "slot {high_slot:#x} resolved");
+            assert_eq!(t.get(past), None);
+            assert_eq!(t.remove(past), None);
+        }
+        assert_eq!(
+            t.get(first),
+            Some(&7),
+            "a refused name disturbed the live entry"
+        );
     }
 
     /// A word survives the trip through a name unchanged, so a boundary that carries plain words

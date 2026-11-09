@@ -94,6 +94,38 @@ fn a_removed_name_stays_dead_whatever_comes_after() {
     }
 }
 
+/// Falsification: replayable `falsifications/verification.the_walk_bound_and_the_live_count_survive_any_operation.patch`
+/// The bookkeeping every walk and `len` lean on survives any operation, with no bound on how
+/// many. The induction step: from any reachable table, one arbitrary operation leaves `top` exactly
+/// one past the highest live slot (so every slot at or above it is empty), and `live` equal to the
+/// number of occupied slots. Those are the facts [`any_reachable_table`] assumes, so they hold after
+/// any number of operations, and every walk bounded by `top` reports exactly `len` entries, not
+/// only after the fixed sequence of [`a_bounded_walk_yields_every_live_entry`].
+#[kani::proof]
+fn the_walk_bound_and_the_live_count_survive_any_operation() {
+    let mut t = any_reachable_table();
+    any_operation(&mut t);
+
+    assert!(t.top <= 2, "the walk bound passed the capacity");
+    assert!(
+        t.slots[t.top..].iter().all(Option::is_none),
+        "a live entry sits above the walk bound"
+    );
+    assert!(
+        t.top == 0 || t.slots[t.top - 1].is_some(),
+        "the walk bound sits above an empty slot"
+    );
+    assert_eq!(
+        t.live,
+        t.slots.iter().filter(|s| s.is_some()).count(),
+        "the live count drifted from the occupied slots"
+    );
+    assert_eq!(t.values().count(), t.len());
+    assert_eq!(t.values_mut().count(), t.len());
+    assert_eq!(t.live_slots().count(), t.len());
+    assert_eq!(t.iter_from(0).count(), t.len());
+}
+
 /// Falsification: replayable `falsifications/verification.live_names_are_distinct_and_resolve_to_their_own_entry.patch`
 /// Two live entries never share a name, and each name resolves to its own entry: the
 /// packing cannot alias two occupants.
@@ -146,6 +178,7 @@ fn a_bounded_walk_yields_every_live_entry() {
     }
 
     assert_eq!(t.values().count(), t.len());
+    assert_eq!(t.values_mut().count(), t.len());
     assert_eq!(t.live_slots().count(), t.len());
     assert_eq!(t.iter_from(0).count(), t.len());
 
