@@ -9,12 +9,12 @@ Expected to fail: the harness's `assert_eq!(Some(probe), minted)`, on any u64 wh
 a live slot index and whose high half is anything at all. A name may come from an untrusted
 caller, so this is the forging case: the table would resolve a number nobody was ever issued.
 diff --git a/src/lib.rs b/src/lib.rs
-index 684df60..05f994a 100644
+index 6287700..b8f65c6 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -253,9 +253,7 @@ impl<T, const N: usize> Table<T, N> {
-         // A slot the target's `usize` cannot hold is no slot of any table there, so it resolves to
-         // nothing rather than truncating onto a low slot that some live entry may hold.
+@@ -323,9 +323,7 @@ impl<T, const N: usize> Table<T, N> {
+         let slot = slot as usize;
+         #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
          let slot = usize::try_from(slot).ok()?;
 -        if *self.generations.get(slot)? != generation {
 -            return None;
