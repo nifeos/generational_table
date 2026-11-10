@@ -104,12 +104,14 @@ impl<T> EntryName<T> {
 
     /// The packed word, for a boundary that carries a plain `u64`: a syscall register, an atomic.
     /// [`from_bits`](Self::from_bits) of the result is this name again.
+    #[inline(always)]
     pub const fn to_bits(self) -> u64 {
         self.bits
     }
 
     /// The name a packed word spells. Total: every `u64` is a name, and one the table never
     /// minted resolves to nothing.
+    #[inline(always)]
     pub const fn from_bits(bits: u64) -> Self {
         Self {
             bits,
@@ -127,6 +129,7 @@ impl<T> Clone for EntryName<T> {
 impl<T> Copy for EntryName<T> {}
 
 impl<T> PartialEq for EntryName<T> {
+    #[inline(always)]
     fn eq(&self, other: &Self) -> bool {
         self.bits == other.bits
     }
