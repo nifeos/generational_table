@@ -317,7 +317,11 @@ impl<T, const N: usize> Table<T, N> {
     pub fn slot_of(&self, name: EntryName<T>) -> Option<usize> {
         let (slot, generation) = Self::unpack(name);
         // A slot the target's `usize` cannot hold is no slot of any table there, so it resolves to
-        // nothing rather than truncating onto a low slot that some live entry may hold.
+        // nothing rather than truncating onto a low slot that some live entry may hold. A `usize` of
+        // 32 bits or more holds every `u32`, so there the widening is lossless and needs no check.
+        #[cfg(any(target_pointer_width = "32", target_pointer_width = "64"))]
+        let slot = slot as usize;
+        #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
         let slot = usize::try_from(slot).ok()?;
         if *self.generations.get(slot)? != generation {
             return None;
