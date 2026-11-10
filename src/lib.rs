@@ -246,6 +246,7 @@ impl<T, const N: usize> Table<T, N> {
 
     /// The slot and the generation a name spells, each as the 32 bits it holds. The slot stays a
     /// `u32` here because a `usize` narrower than 32 bits cannot hold every slot a word spells.
+    #[inline(always)]
     const fn unpack(name: EntryName<T>) -> (u32, u32) {
         let bits = name.to_bits();
         (bits as u32, (bits >> 32) as u32)
@@ -312,10 +313,15 @@ impl<T, const N: usize> Table<T, N> {
     /// entries in a parallel pool with pool slot i = table slot i, so the index *is* the storage
     /// address. `get`/`get_mut`/`remove` are built on this, so every harness
     /// that proves a stale name never resolves proves it for `slot_of` too.
+    #[inline(always)]
     pub fn slot_of(&self, name: EntryName<T>) -> Option<usize> {
         let (slot, generation) = Self::unpack(name);
         // A slot the target's `usize` cannot hold is no slot of any table there, so it resolves to
-        // nothing rather than truncating onto a low slot that some live entry may hold.
+        // nothing rather than truncating onto a low slot that some live entry may hold. A `usize` of
+        // 32 bits or more holds every `u32`, so there the widening is lossless and needs no check.
+        #[cfg(any(target_pointer_width = "32", target_pointer_width = "64"))]
+        let slot = slot as usize;
+        #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
         let slot = usize::try_from(slot).ok()?;
         if *self.generations.get(slot)? != generation {
             return None;
@@ -326,6 +332,7 @@ impl<T, const N: usize> Table<T, N> {
 
     /// Resolve a name. `None` for a name whose entry was removed (however long ago), a name from
     /// a previous occupant of the slot, or garbage. Never the wrong entry.
+    #[inline(always)]
     pub fn get(&self, name: EntryName<T>) -> Option<&T> {
         let slot = self.slot_of(name)?;
         self.slots[slot].as_ref()
@@ -338,6 +345,7 @@ impl<T, const N: usize> Table<T, N> {
     }
 
     /// [`get`](Self::get), mutably.
+    #[inline(always)]
     pub fn get_mut(&mut self, name: EntryName<T>) -> Option<&mut T> {
         let slot = self.slot_of(name)?;
         self.slots[slot].as_mut()

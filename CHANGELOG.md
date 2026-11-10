@@ -13,6 +13,9 @@ sentence beside it.
   a freed slot costs no scan; `cargo bench` reproduces the figures the documentation states.
 - `EntryName::from_bits`, `to_bits` and `eq` are `#[inline(always)]`, so an unoptimized build of a
   caller does not pay a call for each of them.
+- `Table::get`, `get_mut`, `slot_of` and the name unpacking are `#[inline(always)]`, and `slot_of`
+  widens a slot without a checked conversion on a target whose `usize` is 32 bits or more, so an
+  unoptimized build of a caller makes fewer calls per lookup.
 
 ## BUGS
 
