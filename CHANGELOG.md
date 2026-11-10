@@ -11,6 +11,8 @@ sentence beside it.
   implements `PartialOrd` and `Ord` by its packed value.
 - Insert scans from a cursor below which no slot is free, rather than from slot 0, so refilling
   a freed slot costs no scan; `cargo bench` reproduces the figures the documentation states.
+- `EntryName::from_bits`, `to_bits` and `eq` are `#[inline(always)]`, so an unoptimized build of a
+  caller does not pay a call for each of them.
 
 ## BUGS
 
