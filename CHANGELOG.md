@@ -3,6 +3,11 @@
 Dates are UTC. One line per release, what changed and why, so a reader of the diff has the
 sentence beside it.
 
+## 0.1.0-pre.2
+
+- No change to the library. The repository's workflow pins and the mutation-diff time budget moved,
+  and the version is the one a release rehearsal names.
+
 ## 0.1.0-pre.1
 
 - First version.
