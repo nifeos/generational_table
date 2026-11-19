@@ -3,12 +3,13 @@
 Dates are UTC. One line per release, what changed and why, so a reader of the diff has the
 sentence beside it.
 
-## Unreleased
+## 0.1.0-pre.3
 
 - Five `Table` methods change name, with no alias for the old spelling: `slot_of` is `slot_index`,
   `live_slots` is `live_slot_indices`, `iter_from` is `iter_from_slot_index` (its parameter is
   `first_slot_index`), `insert_with` is `insert_with_name` and `capacity` is `slot_count`.
-  `slot_count` counts live, free and retired slots alike.
+  `slot_count` counts live, free and retired slots alike. The `Debug` output names that field
+  `slot_count` too, in place of `capacity`.
 
 ## 0.1.0-pre.2
 

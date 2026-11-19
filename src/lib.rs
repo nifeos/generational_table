@@ -520,9 +520,9 @@ impl<T, const N: usize> Default for Table<T, N> {
     }
 }
 
-/// Prints the table as `Table { len, capacity, entries }`. `len` is the number of live entries and
-/// `capacity` is `N`. `entries` is a map from each live entry's name (printed as its generation
-/// and slot) to the entry, in slot order. Free and retired slots print nothing, so the output
+/// Prints the table as `Table { len, slot_count, entries }`. `len` is the number of live entries
+/// and `slot_count` is `N`. `entries` is a map from each live entry's name (printed as its
+/// generation and slot) to the entry, in slot order. Free and retired slots print nothing, so the output
 /// grows with the live entries and not with `N`, and printing never panics.
 ///
 /// ```
@@ -536,7 +536,7 @@ impl<T, const N: usize> Default for Table<T, N> {
 ///
 /// assert_eq!(
 ///     format!("{t:?}"),
-///     "Table { len: 2, capacity: 1000, entries: \
+///     "Table { len: 2, slot_count: 1000, entries: \
 ///      {EntryName { generation: 1, slot: 0 }: \"c\", EntryName { generation: 0, slot: 1 }: \"b\"} }"
 /// );
 ///
@@ -551,7 +551,7 @@ impl<T: fmt::Debug, const N: usize> fmt::Debug for Table<T, N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Table")
             .field("len", &self.live)
-            .field("capacity", &N)
+            .field("slot_count", &N)
             .field("entries", &LiveEntries(self))
             .finish()
     }
@@ -1112,7 +1112,7 @@ mod tests {
         let t: Table<u32, 4> = Table::new();
         assert_eq!(
             format!("{t:?}"),
-            "Table { len: 0, capacity: 4, entries: {} }"
+            "Table { len: 0, slot_count: 4, entries: {} }"
         );
     }
 
@@ -1128,7 +1128,7 @@ mod tests {
         t.insert_with_name(|_| 30).unwrap();
         assert_eq!(
             format!("{t:?}"),
-            "Table { len: 2, capacity: 4, entries: {EntryName { generation: 1, slot: 0 }: 30, \
+            "Table { len: 2, slot_count: 4, entries: {EntryName { generation: 1, slot: 0 }: 30, \
              EntryName { generation: 0, slot: 1 }: 20} }"
         );
     }
@@ -1146,7 +1146,7 @@ mod tests {
         };
         assert_eq!(
             format!("{retired:?}"),
-            "Table { len: 0, capacity: 2, entries: {} }"
+            "Table { len: 0, slot_count: 2, entries: {} }"
         );
     }
 
@@ -1156,7 +1156,7 @@ mod tests {
         let mut t: Table<u32, 2> = Table::new();
         t.insert_with_name(|_| 5).unwrap();
         let pretty = format!("{t:#?}");
-        assert!(pretty.contains("len: 1,") && pretty.contains("capacity: 2,"));
+        assert!(pretty.contains("len: 1,") && pretty.contains("slot_count: 2,"));
     }
 
     /// A clone resolves every name the original does, including after reuse, and keeps dead names

@@ -61,7 +61,7 @@ generic code). `clear` removes every entry and kills every name the table held. 
 `clear` cost what the table holds, not what it could hold.
 
 `Table<T, N>` implements `Clone` when `T: Clone`, and `Debug` when `T: Debug`. A clone resolves
-exactly the names the original does. `Debug` prints the length, the capacity and the live entries
+exactly the names the original does. `Debug` prints the length, the slot count and the live entries
 only, each under its name, so the output does not grow with `N`. `EntryName<T>` implements `Clone`,
 `Copy`, `PartialEq`, `Eq`, `PartialOrd`, `Ord`, `Hash` and `Debug` for every `T`. Names order by
 their packed value, generation first and then slot, so they key a `BTreeMap` and sort; the order
