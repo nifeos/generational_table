@@ -21,16 +21,16 @@ past a capacity known up front; see the comparison below.
 ```rust
 use generational_table::Table;
 
-// Room for four sessions. `insert_with` hands the new entry its own name.
+// Room for four sessions. `insert_with_name` hands the new entry its own name.
 let mut sessions: Table<(u32, &str), 4> = Table::new();
-let alice = sessions.insert_with(|name| (name.to_bits() as u32, "alice")).unwrap();
-let bob = sessions.insert_with(|_| (0, "bob")).unwrap();
+let alice = sessions.insert_with_name(|name| (name.to_bits() as u32, "alice")).unwrap();
+let bob = sessions.insert_with_name(|_| (0, "bob")).unwrap();
 assert_eq!(sessions.get(alice).map(|s| s.1), Some("alice"));
 assert_eq!(sessions.len(), 2);
 
 // End Alice's session and let someone else take her slot.
 assert!(sessions.remove(alice).is_some());
-let carol = sessions.insert_with(|_| (0, "carol")).unwrap();
+let carol = sessions.insert_with_name(|_| (0, "carol")).unwrap();
 
 // Alice's old name does not reach Carol. It reaches nothing.
 assert_ne!(alice, carol);
@@ -53,11 +53,11 @@ assert!(sessions.get(generational_table::EntryName::NEVER_MINTED).is_none());
 compile where a function wants another table's name. Two tables of the same entry type share a name
 type; give each its own entry type (a one-field wrapper is enough) to keep them apart.
 
-Besides `insert_with`, `get`, `get_mut` and `remove`, the table has `insert` for a value that does
-not need its own name, `contains_key`, `slot_of`, `len`, `is_empty` and `capacity` (`N`, for
+Besides `insert_with_name`, `get`, `get_mut` and `remove`, the table has `insert` for a value that does
+not need its own name, `contains_key`, `slot_index`, `len`, `is_empty` and `slot_count` (`N`, for
 generic code). `clear` removes every entry and kills every name the table held. The walks are
-`values`, `values_mut`, `live_slots`, `iter` and `iter_mut` (each name with its entry), and
-`iter_from`, a sweep that resumes from a slot index after you give a lock back. The walks and
+`values`, `values_mut`, `live_slot_indices`, `iter` and `iter_mut` (each name with its entry), and
+`iter_from_slot_index`, a sweep that resumes from a slot index after you give a lock back. The walks and
 `clear` cost what the table holds, not what it could hold.
 
 `Table<T, N>` implements `Clone` when `T: Clone`, and `Debug` when `T: Debug`. A clone resolves
@@ -150,7 +150,7 @@ The minimum Rust version is held by the weekly `msrv` job, which builds and test
 
 ## BUGS
 
-- Capacity is fixed. `insert_with` returns `None`, without running its closure, when every slot
+- Capacity is fixed. `insert_with_name` returns `None`, without running its closure, when every slot
   is live or retired.
 - Generations are 32-bit and saturate; they never wrap. A slot whose generation reaches
   `u32::MAX` retires and never takes an entry again, so the table's capacity shrinks by one. A slot
@@ -212,7 +212,7 @@ That macro also gives each pool its own handle type. The generation wraps. Its d
 and shows a stale 16-bit handle reaching a new value after 32,768 reuses. Safe code cannot build its
 default handle from an integer, since the constructor is an `unsafe` function. This crate offers a
 safe `from_bits` instead and checks the generation on every lookup. `coca` inserts in constant time,
-its `try_insert_with_handle` matches `insert_with`, and its packed pool keeps values in one dense
+its `try_insert_with_handle` matches `insert_with_name`, and its packed pool keeps values in one dense
 array. It also offers vectors, deques, maps and arenas. It uses `unsafe` code throughout its pools,
 and its changelog cites Miri, the Rust interpreter that detects undefined behavior. Its `new` is not
 `const`. The published source has tests and no proofs or fuzzing.

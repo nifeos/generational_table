@@ -20,13 +20,13 @@ fn a_removed_name_never_resolves_again() {
         t.generations[0] == Table::<u8, 2>::RETIRED - 1,
         "the last occupant a slot takes"
     );
-    let Some(name) = t.insert_with(|_| kani::any()) else {
+    let Some(name) = t.insert_with_name(|_| kani::any()) else {
         return;
     };
     t.remove(name);
 
     // Reuse the slot: the new occupant must not be reachable through the dead name.
-    let reused = t.insert_with(|_| kani::any());
+    let reused = t.insert_with_name(|_| kani::any());
     if let Some(new_name) = reused {
         assert_ne!(new_name, name);
     }
@@ -68,7 +68,7 @@ fn can_take(t: &Table<u8, 2>, slot: usize) -> bool {
 fn any_operation(t: &mut Table<u8, 2>) {
     match kani::any::<u8>() {
         0 => {
-            let _ = t.insert_with(|_| kani::any());
+            let _ = t.insert_with_name(|_| kani::any());
         }
         1 => t.clear(),
         _ => {
@@ -141,8 +141,8 @@ fn the_walk_bound_and_the_live_count_survive_any_operation() {
     );
     assert_eq!(t.values().count(), t.len());
     assert_eq!(t.values_mut().count(), t.len());
-    assert_eq!(t.live_slots().count(), t.len());
-    assert_eq!(t.iter_from(0).count(), t.len());
+    assert_eq!(t.live_slot_indices().count(), t.len());
+    assert_eq!(t.iter_from_slot_index(0).count(), t.len());
 
     // `iter_mut` walks the same entries under the same names as `iter`.
     let mut names = [None; 2];
@@ -172,7 +172,7 @@ fn a_cleared_table_resolves_no_name_it_held() {
     assert!(t.slots.iter().all(Option::is_none));
     assert!(t.get(probe).is_none());
 
-    let next = t.insert_with(|_| kani::any());
+    let next = t.insert_with_name(|_| kani::any());
     if was_live {
         assert_ne!(next, Some(probe), "a cleared name came back");
     }
@@ -211,7 +211,7 @@ fn the_scan_cursor_keeps_first_fit_order() {
     }
 
     let first_fit = (0..2).find(|&slot| can_take(&t, slot));
-    let name = t.insert_with(|_| kani::any());
+    let name = t.insert_with_name(|_| kani::any());
     assert_eq!(
         name.map(|name| name.to_bits() & 0xffff_ffff),
         first_fit.map(|slot| slot as u64),
@@ -226,8 +226,8 @@ fn the_scan_cursor_keeps_first_fit_order() {
 fn live_names_are_distinct_and_resolve_to_their_own_entry() {
     let mut t: Table<u8, 2> = Table::new();
     let (a_value, b_value): (u8, u8) = (kani::any(), kani::any());
-    let a = t.insert_with(|_| a_value).unwrap();
-    let b = t.insert_with(|_| b_value).unwrap();
+    let a = t.insert_with_name(|_| a_value).unwrap();
+    let b = t.insert_with_name(|_| b_value).unwrap();
 
     assert_ne!(a, b);
     assert_eq!(t.get(a).copied(), Some(a_value));
@@ -242,7 +242,7 @@ fn live_names_are_distinct_and_resolve_to_their_own_entry() {
 #[kani::proof]
 fn a_name_the_table_never_minted_resolves_to_nothing() {
     let mut t: Table<u8, 2> = Table::new();
-    let minted = t.insert_with(|_| kani::any());
+    let minted = t.insert_with_name(|_| kani::any());
     let probe = EntryName::from_bits(kani::any());
     if t.get(probe).is_some() {
         assert_eq!(Some(probe), minted);
@@ -258,9 +258,9 @@ fn a_name_the_table_never_minted_resolves_to_nothing() {
 fn a_bounded_walk_yields_every_live_entry() {
     let mut t: Table<u8, 3> = Table::new();
     let names = [
-        t.insert_with(|_| 1).unwrap(),
-        t.insert_with(|_| 2).unwrap(),
-        t.insert_with(|_| 3).unwrap(),
+        t.insert_with_name(|_| 1).unwrap(),
+        t.insert_with_name(|_| 2).unwrap(),
+        t.insert_with_name(|_| 3).unwrap(),
     ];
 
     let drop_it: [bool; 3] = [kani::any(), kani::any(), kani::any()];
@@ -272,8 +272,8 @@ fn a_bounded_walk_yields_every_live_entry() {
 
     assert_eq!(t.values().count(), t.len());
     assert_eq!(t.values_mut().count(), t.len());
-    assert_eq!(t.live_slots().count(), t.len());
-    assert_eq!(t.iter_from(0).count(), t.len());
+    assert_eq!(t.live_slot_indices().count(), t.len());
+    assert_eq!(t.iter_from_slot_index(0).count(), t.len());
 
     // And each survivor is still reachable by name, so the walk and the lookup agree.
     for (name, dropped) in names.iter().zip(drop_it) {

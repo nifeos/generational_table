@@ -1,6 +1,6 @@
 //! Fuzz `Table` with an arbitrary sequence of operations, checked against a plain model.
 //!
-//! Each input byte pair is one operation: insert, get, get_mut, remove, or iter_from, aimed at a
+//! Each input byte pair is one operation: insert, get, get_mut, remove, or iter_from_slot_index, aimed at a
 //! name the table minted earlier (live or removed) or at an arbitrary word from the input. After
 //! every operation the target holds the table to what the proofs promise: a removed name never
 //! resolves again, the live names are distinct, an entry holds the name it was minted with, and
@@ -38,7 +38,7 @@ fuzz_target!(|data: &[u8]| {
                 counter = counter.wrapping_add(1);
                 let value = counter;
                 let before = table.len();
-                match table.insert_with(|n| (n.to_bits(), value)) {
+                match table.insert_with_name(|n| (n.to_bits(), value)) {
                     Some(new) => {
                         assert_eq!(table.len(), before + 1);
                         assert!(
@@ -78,12 +78,12 @@ fuzz_target!(|data: &[u8]| {
             _ => {
                 let from = usize::from(arg) % (SLOTS + 2);
                 let mut last = None;
-                for (slot, n, entry) in table.iter_from(from) {
+                for (slot, n, entry) in table.iter_from_slot_index(from) {
                     assert!(slot >= from && slot < SLOTS);
                     assert!(last.is_none_or(|l| l < slot), "slots not ascending");
                     last = Some(slot);
                     assert_eq!(n.to_bits(), entry.0, "entry holds a different name");
-                    assert_eq!(table.slot_of(n), Some(slot));
+                    assert_eq!(table.slot_index(n), Some(slot));
                 }
             }
         }

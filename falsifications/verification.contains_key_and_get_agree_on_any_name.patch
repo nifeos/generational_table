@@ -15,7 +15,7 @@ index 2214a94..3316e92 100644
      /// Whether `name` resolves to a live entry: [`get`](Self::get) without the reference. `false`
      /// for a removed name, a name from a previous occupant of the slot, or garbage.
      pub fn contains_key(&self, name: EntryName<T>) -> bool {
--        self.slot_of(name).is_some()
+-        self.slot_index(name).is_some()
 +        self.slots
 +            .get(Self::unpack(name).0 as usize)
 +            .is_some_and(Option::is_some)

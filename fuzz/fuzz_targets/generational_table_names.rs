@@ -23,7 +23,7 @@ fuzz_target!(|data: &[u8]| {
     let mut table: Table<u64, SLOTS> = Table::new();
     let mut minted = Vec::new();
     for _ in 0..inserts % 20 {
-        if let Some(name) = table.insert_with(|n| n.to_bits()) {
+        if let Some(name) = table.insert_with_name(|n| n.to_bits()) {
             minted.push(name);
         }
     }
@@ -51,6 +51,6 @@ fuzz_target!(|data: &[u8]| {
             }
         }
         assert_eq!(table.len(), table.iter().count());
-        assert_eq!(table.len(), table.iter_from(0).count());
+        assert_eq!(table.len(), table.iter_from_slot_index(0).count());
     }
 });

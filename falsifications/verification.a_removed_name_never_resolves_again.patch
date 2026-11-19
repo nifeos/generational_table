@@ -13,7 +13,7 @@ index c22f635..b615f12 100644
 +++ b/src/lib.rs
 @@ -346,7 +346,6 @@ impl<T, const N: usize> Table<T, N> {
      pub fn remove(&mut self, name: EntryName<T>) -> Option<T> {
-         let slot = self.slot_of(name)?;
+         let slot = self.slot_index(name)?;
          let value = self.slots[slot].take()?;
 -        self.generations[slot] = self.generations[slot].saturating_add(1);
          self.live -= 1;
