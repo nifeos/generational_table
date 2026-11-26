@@ -19,6 +19,8 @@ sentence beside it.
 - `Table::get_disjoint_mut` returns a mutable reference to each of several named entries at once,
   or `None` if any name is dead or two names repeat, so moving a value between two entries no
   longer needs a remove and a reinsert. It allocates nothing and costs what the names cost, not `N`.
+- Every public method now carries a short example in its documentation, `new` a `static` table
+  and a refused `N` of 0 among them.
 - The manifest names the documentation on docs.rs and adds the `no-std::no-alloc` category, which
   fits a table that never allocates.
 
