@@ -1,0 +1,22 @@
+Falsifies `generational_table::verification::retain_removes_exactly_what_the_test_refuses`.
+
+The defect: `retain` takes a refused entry out of its slot by hand rather than through `remove`,
+so the slot's generation stays where it was. A refused name then resolves to nothing at once,
+since the slot is empty, which is all a test that only looks up the refused name would check; the
+slot's next occupant is minted under that same name, and the old name reaches it.
+
+Expected to fail: the harness's `assert_eq!(t.generations[slot], before.generations[slot] + 1)`,
+on any table with a live entry the test refuses.
+diff --git a/src/lib.rs b/src/lib.rs
+index 7fa7443..ce60bcc 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -449,7 +449,7 @@ impl<T, const N: usize> Table<T, N> {
+             };
+             if !keep(name, value) {
+                 // `remove` keeps the count, the bound and the cursor true before the entry drops.
+-                drop(self.remove(name));
++                drop(self.slots[slot].take());
+             }
+         }
+     }

@@ -418,6 +418,42 @@ impl<T, const N: usize> Table<T, N> {
         self.scan_from = 0;
     }
 
+    /// Keep only the entries `keep` accepts: `keep` sees each live entry once, in slot order, with
+    /// its name, and every entry it answers `false` for is removed as [`remove`](Self::remove)
+    /// removes it, so its name and every copy of it resolve to `None` from then on. `keep` may
+    /// change an entry it keeps. The cost is what the table holds, not `N`.
+    ///
+    /// If `keep` panics, the entries it already refused are removed and the rest stay, and the
+    /// table stays whole.
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut t: Table<u32, 8> = Table::new();
+    /// let names: Vec<_> = (1..=6).map(|v| t.insert(v).unwrap()).collect();
+    /// t.retain(|_name, value| *value % 2 == 0);
+    /// assert_eq!(t.values().copied().collect::<Vec<_>>(), [2, 4, 6]);
+    /// assert_eq!(t.get(names[0]), None, "a refused entry's name is dead");
+    /// assert_eq!(t.get(names[1]), Some(&2));
+    /// ```
+    pub fn retain(&mut self, mut keep: impl FnMut(EntryName<T>, &mut T) -> bool) {
+        // A `for` over `N` with a `break`, as in `remove`, so CBMC sees the bound. `top` only comes
+        // down as entries go, and every slot at or above it is free, so the walk misses nothing.
+        for slot in 0..N {
+            if slot >= self.top {
+                break;
+            }
+            let name = Self::name(slot, self.generations[slot]);
+            let Some(value) = self.slots[slot].as_mut() else {
+                continue;
+            };
+            if !keep(name, value) {
+                // `remove` keeps the count, the bound and the cursor true before the entry drops.
+                drop(self.remove(name));
+            }
+        }
+    }
+
     /// The number of slots, `N`, live, free and retired alike: for code generic over the table's
     /// size. It is not how many entries fit once a slot retires. A table holds at most this many entries, and fewer once a slot retires.
     pub const fn slot_count(&self) -> usize {
@@ -1187,5 +1223,79 @@ mod tests {
         let mut copy = t.clone();
         let name = copy.insert_with_name(|_| 1).unwrap();
         assert_eq!(name.to_bits() & 0xffff_ffff, 1);
+    }
+
+    /// `retain` hands each live entry its own name, in slot order, removes what it refuses as
+    /// `remove` does, and keeps a change made to an entry it keeps.
+    #[test]
+    fn retain_removes_what_the_test_refuses_and_kills_those_names() {
+        let mut t: Table<u32, 8> = Table::new();
+        let names: Vec<_> = (0..5).map(|v| t.insert(v).unwrap()).collect();
+        t.remove(names[1]);
+
+        let mut seen = Vec::new();
+        t.retain(|name, value| {
+            seen.push(name);
+            *value += 10;
+            *value != 12 && *value != 14
+        });
+        assert_eq!(seen, [names[0], names[2], names[3], names[4]]);
+        assert_eq!(t.values().copied().collect::<Vec<_>>(), [10, 13]);
+        assert_eq!(t.len(), 2);
+        assert_eq!(t.get(names[2]), None);
+        assert_eq!(t.get(names[4]), None);
+        assert_eq!(t.generations[..5], [0, 1, 1, 0, 1]);
+        assert_eq!(t.top, 4, "the bound came down past the refused top entry");
+        assert_eq!(t.scan_from, 1, "the cursor sits at the lowest free slot");
+        let refilled = t.insert(99).unwrap();
+        assert_eq!(refilled.to_bits(), (1 << 32) | 1);
+    }
+
+    /// Refusing everything empties the table and walks nothing after; keeping everything changes
+    /// no name.
+    #[test]
+    fn retain_of_all_or_nothing() {
+        let mut t: Table<u32, 4> = Table::new();
+        let names: Vec<_> = (0..3).map(|v| t.insert(v).unwrap()).collect();
+        t.retain(|_, _| true);
+        assert!(names.iter().all(|&n| t.contains_key(n)));
+        t.retain(|_, _| false);
+        assert!(t.is_empty());
+        assert_eq!(t.top, 0);
+        assert_eq!(t.scan_from, 0);
+        assert!(names.iter().all(|&n| !t.contains_key(n)));
+        t.retain(|_, _| unreachable!("an empty table has nothing to test"));
+    }
+
+    /// A slot at its last generation retires through `retain` as through `remove`.
+    #[test]
+    fn retain_retires_a_slot_at_its_last_generation() {
+        let mut t: Table<u32, 2> = Table::new();
+        t.generations[0] = Table::<u32, 2>::RETIRED - 1;
+        t.insert(1).unwrap();
+        t.retain(|_, _| false);
+        assert_eq!(t.generations[0], Table::<u32, 2>::RETIRED);
+        assert_eq!(t.insert(2).map(|n| n.to_bits() & 0xffff_ffff), Some(1));
+    }
+
+    /// A test that panics partway leaves what it already refused removed, the rest in place, and
+    /// the bookkeeping true.
+    #[test]
+    fn a_panicking_test_in_retain_leaves_the_table_whole() {
+        let mut t: Table<u32, 4> = Table::new();
+        let names: Vec<_> = (0..4).map(|v| t.insert(v).unwrap()).collect();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            t.retain(|_, value| match *value {
+                0 => false,
+                2 => panic!("the test gave up"),
+                _ => true,
+            });
+        }));
+        assert!(result.is_err());
+        assert_eq!(t.len(), 3);
+        assert!(!t.contains_key(names[0]));
+        assert!(names[1..].iter().all(|&n| t.contains_key(n)));
+        assert_eq!(t.values().count(), 3);
+        assert_eq!(t.scan_from, 0);
     }
 }

@@ -55,7 +55,8 @@ type; give each its own entry type (a one-field wrapper is enough) to keep them 
 
 Besides `insert_with_name`, `get`, `get_mut` and `remove`, the table has `insert` for a value that does
 not need its own name, `contains_key`, `len`, `is_empty` and `slot_count` (`N`, for
-generic code). `clear` removes every entry and kills every name the table held. The walks are
+generic code). `clear` removes every entry and kills every name the table held, and `retain`
+removes every entry a test refuses, killing those names. The walks are
 `values`, `values_mut`, `iter` and `iter_mut` (each name with its entry), and
 `iter_from_slot_index`, a sweep that resumes from a slot index after you give a lock back. The walks and
 `clear` cost what the table holds, not what it could hold. Each walk returns a type you can name and
@@ -72,7 +73,7 @@ says nothing about which entry came first.
 
 ## What is proven
 
-Ten Kani harnesses prove the safety claims. Kani is a model checker that proves properties for
+Eleven Kani harnesses prove the safety claims. Kani is a model checker that proves properties for
 all inputs up to a stated size. The next section says how to run them.
 
 - `a_removed_name_never_resolves_again`: from any starting generations, the last one before
@@ -89,13 +90,16 @@ all inputs up to a stated size. The next section says how to run them.
 - `a_clone_resolves_exactly_the_same_names`: from any reachable two-slot table, a clone and the
   original resolve any name alike, a forged one included.
 - `the_walk_bound_and_the_live_count_survive_any_operation`: the induction step for the walks.
-  From any reachable two-slot table, any insert, remove or clear keeps the walk bound exactly one
-  past the highest live slot and the live count equal to the occupied slots. So every walk reports
-  exactly `len` entries after any number of operations, and `iter_mut` yields the names `iter`
-  does.
+  From any reachable two-slot table, any insert, remove, clear or retain keeps the walk bound
+  exactly one past the highest live slot and the live count equal to the occupied slots. So every
+  walk reports exactly `len` entries after any number of operations, and `iter_mut` yields the
+  names `iter` does.
 - `the_scan_cursor_keeps_first_fit_order`: from any reachable two-slot table, after any
   operation, no free slot sits below insert's scan cursor, and the next insert fills exactly the
   slot a scan from slot 0 would. The cursor changes what insert reads, never the names it mints.
+- `retain_removes_exactly_what_the_test_refuses`: from any reachable two-slot table and any
+  answers, `retain` shows its test each live entry once under its own name, a kept entry still
+  resolves, and a refused one resolves nowhere and leaves its slot one generation on.
 - `a_cleared_table_resolves_no_name_it_held`: from any reachable two-slot table, `clear` leaves
   nothing to walk, and no name the table held before it resolves, even after the next insert.
 - `contains_key_and_get_agree_on_any_name`: for any `u64`, `contains_key` answers exactly what
@@ -131,7 +135,7 @@ cargo kani setup
 cargo kani
 ```
 
-A passing run ends with `Complete - 10 successfully verified harnesses, 0 failures, 10 total.` Above
+A passing run ends with `Complete - 11 successfully verified harnesses, 0 failures, 11 total.` Above
 that line it also prints compiler warnings, a list of unsupported constructs and a few checks
 marked `UNREACHABLE`. None of those is a failure; each harness's own verdict is its
 `VERIFICATION:- SUCCESSFUL` line.

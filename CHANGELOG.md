@@ -12,6 +12,10 @@ sentence beside it.
   for every entry type.
 - `Table` implements `IntoIterator` by shared reference, by mutable reference and by value, so
   `for (name, entry) in &table` compiles. The walk by value is the new `IntoIter`.
+- `Table::retain` removes every entry a test refuses, as `remove` removes it, and hands the test
+  each entry's name. A `no_std` caller had no buffer to hold the names between a walk and the
+  removals. A new Kani harness proves it, and the induction harnesses take it as one more
+  operation.
 - The manifest names the documentation on docs.rs and adds the `no-std::no-alloc` category, which
   fits a table that never allocates.
 
