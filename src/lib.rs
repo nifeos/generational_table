@@ -35,7 +35,9 @@
 //! # Traits
 //!
 //! `Table<T, N>` implements `Clone` when `T: Clone` and `Debug` when `T: Debug`. It has no
-//! `Default` beyond [`Table::new`]'s empty table, no `PartialEq` and no `Hash`. `EntryName<T>`
+//! `Default` beyond [`Table::new`]'s empty table, no `PartialEq` and no `Hash`. It implements
+//! `IntoIterator` by shared reference, by mutable reference and by value, so a `for` loop walks it
+//! each way and yields each live entry with its name. `EntryName<T>`
 //! implements `Clone`, `Copy`, `PartialEq`, `Eq`, `PartialOrd`, `Ord`, `Hash` and `Debug` for
 //! every `T`, and no `Default`: every `u64` is a name, so there is no name to call the default.
 
@@ -49,7 +51,7 @@ use core::marker::PhantomData;
 
 mod iter;
 
-pub use iter::{Iter, IterFromSlotIndex, IterMut, Values, ValuesMut};
+pub use iter::{IntoIter, Iter, IterFromSlotIndex, IterMut, Values, ValuesMut};
 
 #[cfg(doctest)]
 #[doc = include_str!("../README.md")]

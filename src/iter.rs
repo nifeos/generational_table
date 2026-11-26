@@ -2,8 +2,10 @@
 //! entries in slot order, skips free and retired slots, and stops at the table's walk bound, so it
 //! costs what the table holds rather than `N`. Each walk but [`IterFromSlotIndex`] knows how many
 //! entries it has left, so it implements [`ExactSizeIterator`]; every walk implements
-//! [`FusedIterator`] and [`DoubleEndedIterator`].
+//! [`FusedIterator`] and [`DoubleEndedIterator`]. A `for` loop takes a table by shared reference,
+//! by mutable reference or by value, through the three [`IntoIterator`] implementations here.
 
+use core::array;
 use core::fmt;
 use core::iter::FusedIterator;
 use core::slice;
@@ -411,9 +413,116 @@ impl<T: fmt::Debug> fmt::Debug for IterFromSlotIndex<'_, T> {
     }
 }
 
+/// Each live entry with its name, by value, in slot order: what a `for` loop over a table walks
+/// when it takes the table itself. Entries the walk has not reached are dropped with it.
+pub struct IntoIter<T, const N: usize> {
+    slots: array::IntoIter<Option<T>, N>,
+    generations: [u32; N],
+    /// The slot index of the next slot from the front.
+    front: usize,
+    remaining: usize,
+}
+
+impl<T, const N: usize> IntoIter<T, N> {
+    fn new(table: Table<T, N>) -> Self {
+        let mut slots = table.slots.into_iter();
+        // Drop the free slots above the walk bound now, so a walk from the back starts at the
+        // highest live entry rather than at slot `N - 1`.
+        if table.top < N {
+            slots.nth_back(N - table.top - 1);
+        }
+        Self {
+            slots,
+            generations: table.generations,
+            front: 0,
+            remaining: table.live,
+        }
+    }
+}
+
+impl<T, const N: usize> Iterator for IntoIter<T, N> {
+    type Item = (EntryName<T>, T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.remaining > 0 {
+            let entry = self.slots.next()?;
+            let slot = self.front;
+            self.front += 1;
+            if let Some(value) = entry {
+                self.remaining -= 1;
+                return Some((EntryName::new(slot, self.generations[slot]), value));
+            }
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl<T, const N: usize> DoubleEndedIterator for IntoIter<T, N> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        while self.remaining > 0 {
+            let entry = self.slots.next_back()?;
+            if let Some(value) = entry {
+                let slot = self.front + self.slots.len();
+                self.remaining -= 1;
+                return Some((EntryName::new(slot, self.generations[slot]), value));
+            }
+        }
+        None
+    }
+}
+
+impl<T, const N: usize> ExactSizeIterator for IntoIter<T, N> {}
+
+impl<T, const N: usize> FusedIterator for IntoIter<T, N> {}
+
+/// Prints how many entries the walk has left.
+impl<T, const N: usize> fmt::Debug for IntoIter<T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IntoIter")
+            .field("remaining", &self.remaining)
+            .finish()
+    }
+}
+
+/// `for (name, entry) in &table`, the same walk as [`Table::iter`].
+impl<'a, T, const N: usize> IntoIterator for &'a Table<T, N> {
+    type Item = (EntryName<T>, &'a T);
+    type IntoIter = Iter<'a, T>;
+
+    fn into_iter(self) -> Iter<'a, T> {
+        self.iter()
+    }
+}
+
+/// `for (name, entry) in &mut table`, the same walk as [`Table::iter_mut`].
+impl<'a, T, const N: usize> IntoIterator for &'a mut Table<T, N> {
+    type Item = (EntryName<T>, &'a mut T);
+    type IntoIter = IterMut<'a, T>;
+
+    fn into_iter(self) -> IterMut<'a, T> {
+        self.iter_mut()
+    }
+}
+
+/// `for (name, entry) in table`, which takes the table and hands each entry over by value with
+/// the name it had. The names die with the table.
+impl<T, const N: usize> IntoIterator for Table<T, N> {
+    type Item = (EntryName<T>, T);
+    type IntoIter = IntoIter<T, N>;
+
+    fn into_iter(self) -> IntoIter<T, N> {
+        IntoIter::new(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{EntryName, Iter, Table};
+    use std::rc::Rc;
 
     /// A table of four with a hole at slot 1: entries 10, 30 and 40 at slots 0, 2 and 3.
     fn table_with_a_hole() -> (Table<u32, 6>, [EntryName<u32>; 4]) {
@@ -553,5 +662,68 @@ mod tests {
             "ValuesMut { remaining: 3 }"
         );
         assert_eq!(format!("{:?}", t.iter_mut()), "IterMut { remaining: 3 }");
+    }
+
+    /// A `for` loop takes a table by shared reference, by mutable reference and by value, and
+    /// each yields the names `iter` yields.
+    #[test]
+    fn a_for_loop_walks_a_table_three_ways() {
+        let (mut t, names) = table_with_a_hole();
+        let expected = [(names[0], 10), (names[2], 30), (names[3], 40)];
+
+        let mut shared = Vec::new();
+        for (name, value) in &t {
+            shared.push((name, *value));
+        }
+        assert_eq!(shared, expected);
+
+        for (_, value) in &mut t {
+            *value += 1;
+        }
+        let owned: Vec<_> = t.into_iter().collect();
+        assert_eq!(owned, expected.map(|(n, v)| (n, v + 1)));
+    }
+
+    /// The walk by value runs from either end, knows its length, and stays finished.
+    #[test]
+    fn the_walk_by_value_runs_from_either_end() {
+        let (t, names) = table_with_a_hole();
+        let mut owned = t.into_iter();
+        assert_eq!(owned.len(), 3);
+        assert_eq!(owned.next_back(), Some((names[3], 40)));
+        assert_eq!(owned.next(), Some((names[0], 10)));
+        assert_eq!(format!("{owned:?}"), "IntoIter { remaining: 1 }");
+        assert_eq!(owned.next_back(), Some((names[2], 30)));
+        assert_eq!(owned.size_hint(), (0, Some(0)));
+        assert!(owned.next().is_none() && owned.next_back().is_none());
+
+        let full: Table<u8, 2> = {
+            let mut t = Table::new();
+            t.insert(1).unwrap();
+            t.insert(2).unwrap();
+            t
+        };
+        assert_eq!(
+            full.into_iter().rev().map(|(_, v)| v).collect::<Vec<_>>(),
+            [2, 1]
+        );
+        assert_eq!(Table::<u8, 3>::new().into_iter().count(), 0);
+    }
+
+    /// Entries the walk by value has not reached are dropped with it, once each.
+    #[test]
+    fn the_walk_by_value_drops_what_it_leaves() {
+        let witness = Rc::new(());
+        let mut t: Table<Rc<()>, 4> = Table::new();
+        for _ in 0..3 {
+            t.insert(Rc::clone(&witness)).unwrap();
+        }
+        let mut owned = t.into_iter();
+        let (_, first) = owned.next().unwrap();
+        assert_eq!(Rc::strong_count(&witness), 4);
+        drop(owned);
+        assert_eq!(Rc::strong_count(&witness), 2, "the walk kept what it left");
+        drop(first);
+        assert_eq!(Rc::strong_count(&witness), 1);
     }
 }

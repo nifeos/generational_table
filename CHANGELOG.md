@@ -10,6 +10,8 @@ sentence beside it.
   `DoubleEndedIterator` and `FusedIterator`, and each but `IterFromSlotIndex` implements
   `ExactSizeIterator`, counting down from the table's live count. The shared walks implement `Clone`
   for every entry type.
+- `Table` implements `IntoIterator` by shared reference, by mutable reference and by value, so
+  `for (name, entry) in &table` compiles. The walk by value is the new `IntoIter`.
 - The manifest names the documentation on docs.rs and adds the `no-std::no-alloc` category, which
   fits a table that never allocates.
 
