@@ -5,6 +5,11 @@ sentence beside it.
 
 ## Unreleased
 
+- The walks return named types, `Values`, `ValuesMut`, `Iter`, `IterMut` and `IterFromSlotIndex`, in
+  place of `impl Iterator`, so a caller can keep one in a field. Each implements
+  `DoubleEndedIterator` and `FusedIterator`, and each but `IterFromSlotIndex` implements
+  `ExactSizeIterator`, counting down from the table's live count. The shared walks implement `Clone`
+  for every entry type.
 - The manifest names the documentation on docs.rs and adds the `no-std::no-alloc` category, which
   fits a table that never allocates.
 

@@ -58,7 +58,9 @@ not need its own name, `contains_key`, `len`, `is_empty` and `slot_count` (`N`, 
 generic code). `clear` removes every entry and kills every name the table held. The walks are
 `values`, `values_mut`, `iter` and `iter_mut` (each name with its entry), and
 `iter_from_slot_index`, a sweep that resumes from a slot index after you give a lock back. The walks and
-`clear` cost what the table holds, not what it could hold.
+`clear` cost what the table holds, not what it could hold. Each walk returns a type you can name and
+keep in a field (`Values`, `ValuesMut`, `Iter`, `IterMut` and `IterFromSlotIndex`). Each runs from
+either end and stays finished once it ends, and each but `IterFromSlotIndex` knows its exact length.
 
 `Table<T, N>` implements `Clone` when `T: Clone`, and `Debug` when `T: Debug`. A clone resolves
 exactly the names the original does. `Debug` prints the length, the slot count and the live entries

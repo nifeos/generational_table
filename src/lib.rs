@@ -47,6 +47,10 @@ use core::fmt;
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
 
+mod iter;
+
+pub use iter::{Iter, IterFromSlotIndex, IterMut, Values, ValuesMut};
+
 #[cfg(doctest)]
 #[doc = include_str!("../README.md")]
 struct ReadmeExample;
@@ -117,6 +121,11 @@ impl<T> EntryName<T> {
             bits,
             entry: PhantomData,
         }
+    }
+
+    /// The name of `slot` at `generation`: the generation in the high 32 bits, the slot in the low.
+    const fn new(slot: usize, generation: u32) -> Self {
+        Self::from_bits(((generation as u64) << 32) | slot as u64)
     }
 }
 
@@ -241,7 +250,7 @@ impl<T, const N: usize> Table<T, N> {
     const RETIRED: u32 = u32::MAX;
 
     const fn name(slot: usize, generation: u32) -> EntryName<T> {
-        EntryName::from_bits(((generation as u64) << 32) | slot as u64)
+        EntryName::new(slot, generation)
     }
 
     /// The slot and the generation a name spells, each as the 32 bits it holds. The slot stays a
@@ -426,38 +435,30 @@ impl<T, const N: usize> Table<T, N> {
 
     /// Every live entry by mutable reference, in slot order. For whole-table sweeps, such as revoking every record that refers to something that is
     /// going away; nothing on a hot path should iterate.
-    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
-        let top = self.top;
-        self.slots[..top].iter_mut().filter_map(|s| s.as_mut())
+    pub fn values_mut(&mut self) -> ValuesMut<'_, T> {
+        ValuesMut::new(self)
     }
 
     /// Every live entry by shared reference, in slot order. For a table whose values *are* the
     /// storage (a table of raw pointers to entries that live elsewhere, for example), this is
     /// how the caller reaches each without a second lookup.
-    pub fn values(&self) -> impl Iterator<Item = &T> + '_ {
-        self.slots[..self.top].iter().filter_map(|s| s.as_ref())
+    pub fn values(&self) -> Values<'_, T> {
+        Values::new(self)
     }
 
     /// Every live entry with its current name, in slot order. For sweeps that must *remove* what
     /// they find and so need the name, not just the value (for example, find every entry
     /// that refers to something going away, then remove it by name). `values`/`values_mut` suffice when the caller
     /// only needs the entry, as when each entry carries its own name.
-    pub fn iter(&self) -> impl Iterator<Item = (EntryName<T>, &T)> + '_ {
-        self.iter_from_slot_index(0).map(|(_, name, t)| (name, t))
+    pub fn iter(&self) -> Iter<'_, T> {
+        Iter::new(self)
     }
 
     /// Every live entry with its current name, by mutable reference, in slot order. For sweeps
     /// that change entries and also need each entry's name, which
     /// [`values_mut`](Self::values_mut) does not give.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (EntryName<T>, &mut T)> + '_ {
-        let top = self.top;
-        self.slots[..top]
-            .iter_mut()
-            .zip(&self.generations)
-            .enumerate()
-            .filter_map(|(slot, (s, &generation))| {
-                s.as_mut().map(|t| (Self::name(slot, generation), t))
-            })
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
+        IterMut::new(self)
     }
 
     /// Every live entry from slot `first_slot_index` onward, as `(slot, name, &T)`, in slot order.
@@ -488,18 +489,8 @@ impl<T, const N: usize> Table<T, N> {
     /// // And a cursor past the end is empty rather than a panic.
     /// assert_eq!(t.iter_from_slot_index(99).count(), 0);
     /// ```
-    pub fn iter_from_slot_index(
-        &self,
-        first_slot_index: usize,
-    ) -> impl Iterator<Item = (usize, EntryName<T>, &T)> + '_ {
-        self.slots[..self.top]
-            .iter()
-            .enumerate()
-            .skip(first_slot_index)
-            .filter_map(|(slot, s)| {
-                s.as_ref()
-                    .map(|t| (slot, Self::name(slot, self.generations[slot]), t))
-            })
+    pub fn iter_from_slot_index(&self, first_slot_index: usize) -> IterFromSlotIndex<'_, T> {
+        IterFromSlotIndex::new(self, first_slot_index)
     }
 }
 
