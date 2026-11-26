@@ -444,7 +444,10 @@ impl<T, const N: usize> Iterator for IntoIter<T, N> {
     type Item = (EntryName<T>, T);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while self.remaining > 0 {
+        if self.remaining == 0 {
+            return None;
+        }
+        loop {
             let entry = self.slots.next()?;
             let slot = self.front;
             self.front += 1;
@@ -453,7 +456,6 @@ impl<T, const N: usize> Iterator for IntoIter<T, N> {
                 return Some((EntryName::new(slot, self.generations[slot]), value));
             }
         }
-        None
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -463,7 +465,10 @@ impl<T, const N: usize> Iterator for IntoIter<T, N> {
 
 impl<T, const N: usize> DoubleEndedIterator for IntoIter<T, N> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        while self.remaining > 0 {
+        if self.remaining == 0 {
+            return None;
+        }
+        loop {
             let entry = self.slots.next_back()?;
             if let Some(value) = entry {
                 let slot = self.front + self.slots.len();
@@ -471,7 +476,6 @@ impl<T, const N: usize> DoubleEndedIterator for IntoIter<T, N> {
                 return Some((EntryName::new(slot, self.generations[slot]), value));
             }
         }
-        None
     }
 }
 
@@ -550,6 +554,65 @@ mod tests {
         let mut values_mut = t.values_mut();
         values_mut.next_back();
         assert_eq!(values_mut.len(), 2);
+    }
+
+    /// Steps a walk of three from the front, the back and the front again, checking after each
+    /// step that `len` and `size_hint` both say exactly what is left.
+    fn counts_down_exactly<I: DoubleEndedIterator + ExactSizeIterator>(mut walk: I) {
+        assert_eq!((walk.len(), walk.size_hint()), (3, (3, Some(3))));
+        assert!(walk.next().is_some());
+        assert_eq!((walk.len(), walk.size_hint()), (2, (2, Some(2))));
+        assert!(walk.next_back().is_some());
+        assert_eq!((walk.len(), walk.size_hint()), (1, (1, Some(1))));
+        assert!(walk.next().is_some());
+        assert_eq!((walk.len(), walk.size_hint()), (0, (0, Some(0))));
+        assert!(walk.next().is_none() && walk.next_back().is_none());
+    }
+
+    /// Every walk with an exact length keeps it exact after each step from either end.
+    #[test]
+    fn every_exact_walk_counts_down_after_each_step() {
+        let (mut t, _) = table_with_a_hole();
+        counts_down_exactly(t.values());
+        counts_down_exactly(t.values_mut());
+        counts_down_exactly(t.iter());
+        counts_down_exactly(t.iter_mut());
+        counts_down_exactly(t.clone().into_iter());
+        counts_down_exactly(t.iter().rev());
+        counts_down_exactly(t.values_mut().rev());
+        counts_down_exactly(t.iter_mut().rev());
+        counts_down_exactly(t.into_iter().rev());
+    }
+
+    /// The bound a walk from a slot index gives drops with each entry it yields, from either
+    /// end, when the live count is the tighter of its two bounds.
+    #[test]
+    fn a_walk_from_a_slot_index_lowers_its_bound_after_each_step() {
+        let (t, _) = table_with_a_hole();
+        let mut from = t.iter_from_slot_index(0);
+        assert_eq!(from.size_hint(), (0, Some(3)));
+        assert_eq!(from.next().map(|entry| entry.0), Some(0));
+        assert_eq!(
+            from.size_hint(),
+            (0, Some(2)),
+            "two live entries left in three slots"
+        );
+        assert_eq!(from.next_back().map(|entry| entry.0), Some(3));
+        assert_eq!(
+            from.size_hint(),
+            (0, Some(1)),
+            "one live entry left in two slots"
+        );
+        assert_eq!(from.next().map(|entry| entry.0), Some(2));
+        assert_eq!(from.size_hint(), (0, Some(0)));
+
+        let mut from = t.iter_from_slot_index(0);
+        assert_eq!(from.next_back().map(|entry| entry.0), Some(3));
+        assert_eq!(
+            from.size_hint(),
+            (0, Some(2)),
+            "two live entries left in three slots"
+        );
     }
 
     /// From the back, each walk yields the same entries under the same names, in reverse.
