@@ -5,7 +5,7 @@ sentence beside it.
 
 ## Unreleased
 
-- Breaking: `Table::live_slot_indices` is removed and `Table::slot_index` is private. They served a
+- Breaking: the crate removes `Table::live_slot_indices` and makes `Table::slot_index` private. They served a
   parallel pool of entries indexed by table slot, which nothing used. `iter_from_slot_index(0)`
   still yields each live slot index beside its name and entry.
 
