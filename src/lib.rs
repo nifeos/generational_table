@@ -349,20 +349,101 @@ impl<T, const N: usize> Table<T, N> {
 
     /// Whether `name` resolves to a live entry: [`get`](Self::get) without the reference. `false`
     /// for a removed name, a name from a previous occupant of the slot, or garbage.
+    ///
+    /// ```
+    /// use generational_table::{EntryName, Table};
+    ///
+    /// let mut t: Table<u8, 4> = Table::new();
+    /// let a = t.insert(1).unwrap();
+    /// assert!(t.contains_key(a));
+    /// assert!(!t.contains_key(EntryName::NEVER_MINTED));
+    /// t.remove(a);
+    /// assert!(!t.contains_key(a));
+    /// ```
     pub fn contains_key(&self, name: EntryName<T>) -> bool {
         self.slot_index(name).is_some()
     }
 
     /// [`get`](Self::get), mutably.
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut counters: Table<u32, 4> = Table::new();
+    /// let hits = counters.insert(0).unwrap();
+    /// *counters.get_mut(hits).unwrap() += 1;
+    /// assert_eq!(counters.get(hits), Some(&1));
+    /// ```
     #[inline(always)]
     pub fn get_mut(&mut self, name: EntryName<T>) -> Option<&mut T> {
         let slot = self.slot_index(name)?;
         self.slots[slot].as_mut()
     }
 
+    /// [`get_mut`](Self::get_mut) for several names at once: a mutable reference to each entry, in
+    /// the order of `names`, or `None` if any name does not resolve or two names are the same
+    /// name. The cost grows with `M`, not with `N`: the names are sorted by slot, with no
+    /// allocation, and the table is split once between each pair.
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut accounts: Table<u32, 4> = Table::new();
+    /// let alice = accounts.insert(100).unwrap();
+    /// let bob = accounts.insert(20).unwrap();
+    ///
+    /// // Move 30 from Alice to Bob, holding both entries at once.
+    /// let [from, to] = accounts.get_disjoint_mut([alice, bob]).unwrap();
+    /// *from -= 30;
+    /// *to += 30;
+    /// assert_eq!((accounts.get(alice), accounts.get(bob)), (Some(&70), Some(&50)));
+    ///
+    /// // The same name twice is refused, as is a dead name.
+    /// assert!(accounts.get_disjoint_mut([alice, alice]).is_none());
+    /// accounts.remove(bob);
+    /// assert!(accounts.get_disjoint_mut([alice, bob]).is_none());
+    /// ```
+    pub fn get_disjoint_mut<const M: usize>(
+        &mut self,
+        names: [EntryName<T>; M],
+    ) -> Option<[&mut T; M]> {
+        // Each name's slot beside its place in `names`, sorted by slot, so a repeat sits next to
+        // its twin and the slots can be split off the table from the low end up.
+        let mut slots = [(0, 0); M];
+        for (place, name) in names.into_iter().enumerate() {
+            slots[place] = (self.slot_index(name)?, place);
+        }
+        slots.sort_unstable();
+        if slots.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+            return None;
+        }
+        let mut found: [Option<&mut T>; M] = [const { None }; M];
+        let mut rest: &mut [Option<T>] = &mut self.slots;
+        let mut first_in_rest = 0;
+        for (slot, place) in slots {
+            let (entry, tail) =
+                core::mem::take(&mut rest)[slot - first_in_rest..].split_first_mut()?;
+            found[place] = entry.as_mut();
+            rest = tail;
+            first_in_rest = slot + 1;
+        }
+        // Every slot resolved above, so every place holds its entry.
+        Some(found.map(|entry| entry.expect("a slot that resolved holds its entry")))
+    }
+
     /// Remove and return the entry, bumping the slot's generation: from this moment `name` (and
     /// every copy of it, wherever it is held) resolves to `None`, forever. The bump saturates, so
     /// the occupant at `RETIRED - 1` leaves its slot retired rather than wrapping it to 0.
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut t: Table<String, 4> = Table::new();
+    /// let a = t.insert("a".to_string()).unwrap();
+    /// let copy = a;
+    /// assert_eq!(t.remove(a).as_deref(), Some("a"));
+    /// assert_eq!(t.remove(copy), None, "every copy of the name died with the entry");
+    /// ```
     pub fn remove(&mut self, name: EntryName<T>) -> Option<T> {
         let slot = self.slot_index(name)?;
         let value = self.slots[slot].take()?;
@@ -1297,5 +1378,44 @@ mod tests {
         assert!(names[1..].iter().all(|&n| t.contains_key(n)));
         assert_eq!(t.values().count(), 3);
         assert_eq!(t.scan_from, 0);
+    }
+
+    /// `get_disjoint_mut` hands back each named entry in the order of the names, whatever their
+    /// slot order, and a write through each lands in that entry.
+    #[test]
+    fn get_disjoint_mut_follows_the_order_of_the_names() {
+        let mut t: Table<u32, 5> = Table::new();
+        let names: Vec<_> = (0..5).map(|v| t.insert(v * 10).unwrap()).collect();
+        let [d, a, c] = t.get_disjoint_mut([names[3], names[0], names[2]]).unwrap();
+        assert_eq!((*d, *a, *c), (30, 0, 20));
+        *d += 1;
+        *a += 2;
+        *c += 3;
+        assert_eq!(t.values().copied().collect::<Vec<_>>(), [2, 10, 23, 31, 40]);
+
+        let [only] = t.get_disjoint_mut([names[4]]).unwrap();
+        *only = 7;
+        assert_eq!(t.get(names[4]), Some(&7));
+        assert_eq!(t.get_disjoint_mut::<0>([]), Some([]));
+    }
+
+    /// Any dead, forged or repeated name refuses the whole borrow.
+    #[test]
+    fn get_disjoint_mut_refuses_a_dead_forged_or_repeated_name() {
+        let mut t: Table<u32, 4> = Table::new();
+        let a = t.insert(1).unwrap();
+        let b = t.insert(2).unwrap();
+        let c = t.insert(3).unwrap();
+        assert!(t.get_disjoint_mut([a, b, a]).is_none());
+        assert!(t.get_disjoint_mut([c, c]).is_none());
+        assert!(t.get_disjoint_mut([a, EntryName::NEVER_MINTED]).is_none());
+        assert!(t.get_disjoint_mut([EntryName::from_bits(3), a]).is_none());
+        t.remove(b);
+        let reused = t.insert(9).unwrap();
+        assert!(
+            t.get_disjoint_mut([b, c]).is_none(),
+            "a dead name reached its slot"
+        );
+        assert!(t.get_disjoint_mut([reused, c, a]).is_some());
     }
 }

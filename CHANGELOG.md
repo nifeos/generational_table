@@ -16,6 +16,9 @@ sentence beside it.
   each entry's name. A `no_std` caller had no buffer to hold the names between a walk and the
   removals. A new Kani harness proves it, and the induction harnesses take it as one more
   operation.
+- `Table::get_disjoint_mut` returns a mutable reference to each of several named entries at once,
+  or `None` if any name is dead or two names repeat, so moving a value between two entries no
+  longer needs a remove and a reinsert. It allocates nothing and costs what the names cost, not `N`.
 - The manifest names the documentation on docs.rs and adds the `no-std::no-alloc` category, which
   fits a table that never allocates.
 
