@@ -54,9 +54,9 @@ compile where a function wants another table's name. Two tables of the same entr
 type; give each its own entry type (a one-field wrapper is enough) to keep them apart.
 
 Besides `insert_with_name`, `get`, `get_mut` and `remove`, the table has `insert` for a value that does
-not need its own name, `contains_key`, `slot_index`, `len`, `is_empty` and `slot_count` (`N`, for
+not need its own name, `contains_key`, `len`, `is_empty` and `slot_count` (`N`, for
 generic code). `clear` removes every entry and kills every name the table held. The walks are
-`values`, `values_mut`, `live_slot_indices`, `iter` and `iter_mut` (each name with its entry), and
+`values`, `values_mut`, `iter` and `iter_mut` (each name with its entry), and
 `iter_from_slot_index`, a sweep that resumes from a slot index after you give a lock back. The walks and
 `clear` cost what the table holds, not what it could hold.
 

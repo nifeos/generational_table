@@ -83,7 +83,6 @@ fuzz_target!(|data: &[u8]| {
                     assert!(last.is_none_or(|l| l < slot), "slots not ascending");
                     last = Some(slot);
                     assert_eq!(n.to_bits(), entry.0, "entry holds a different name");
-                    assert_eq!(table.slot_index(n), Some(slot));
                 }
             }
         }

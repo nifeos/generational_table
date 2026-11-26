@@ -309,12 +309,10 @@ impl<T, const N: usize> Table<T, N> {
     }
 
     /// The validated slot index behind a name, or `None` exactly when the name is dead or
-    /// garbage. This is the first half of every lookup, exposed because a caller may keep its
-    /// entries in a parallel pool with pool slot i = table slot i, so the index *is* the storage
-    /// address. `get`/`get_mut`/`remove` are built on this, so every harness
-    /// that proves a stale name never resolves proves it for `slot_index` too.
+    /// garbage. This is the first half of every lookup: `get`, `get_mut` and `remove` are built
+    /// on it, so every harness that proves a stale name never resolves proves it for this too.
     #[inline(always)]
-    pub fn slot_index(&self, name: EntryName<T>) -> Option<usize> {
+    fn slot_index(&self, name: EntryName<T>) -> Option<usize> {
         let (slot, generation) = Self::unpack(name);
         // A slot the target's `usize` cannot hold is no slot of any table there, so it resolves to
         // nothing rather than truncating onto a low slot that some live entry may hold. A `usize` of
@@ -431,15 +429,6 @@ impl<T, const N: usize> Table<T, N> {
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
         let top = self.top;
         self.slots[..top].iter_mut().filter_map(|s| s.as_mut())
-    }
-
-    /// The slot index of every live entry, in slot order; each index appears at most once. The
-    /// caller with a parallel pool iterates its storage with this.
-    pub fn live_slot_indices(&self) -> impl Iterator<Item = usize> + '_ {
-        self.slots[..self.top]
-            .iter()
-            .enumerate()
-            .filter_map(|(i, s)| s.as_ref().map(|_| i))
     }
 
     /// Every live entry by shared reference, in slot order. For a table whose values *are* the
@@ -704,7 +693,12 @@ mod tests {
 
         t.remove(b);
         assert_eq!(t.values().copied().collect::<Vec<_>>(), vec![10, 30]);
-        assert_eq!(t.live_slot_indices().collect::<Vec<_>>(), vec![0, 2]);
+        assert_eq!(
+            t.iter_from_slot_index(0)
+                .map(|(slot, _, _)| slot)
+                .collect::<Vec<_>>(),
+            vec![0, 2]
+        );
         assert_eq!(t.iter().map(|(n, _)| n).collect::<Vec<_>>(), vec![a, c]);
 
         // Removing the top one lets the bound come down past the hole; what is left is still found.

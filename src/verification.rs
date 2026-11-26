@@ -141,7 +141,6 @@ fn the_walk_bound_and_the_live_count_survive_any_operation() {
     );
     assert_eq!(t.values().count(), t.len());
     assert_eq!(t.values_mut().count(), t.len());
-    assert_eq!(t.live_slot_indices().count(), t.len());
     assert_eq!(t.iter_from_slot_index(0).count(), t.len());
 
     // `iter_mut` walks the same entries under the same names as `iter`.
@@ -272,7 +271,6 @@ fn a_bounded_walk_yields_every_live_entry() {
 
     assert_eq!(t.values().count(), t.len());
     assert_eq!(t.values_mut().count(), t.len());
-    assert_eq!(t.live_slot_indices().count(), t.len());
     assert_eq!(t.iter_from_slot_index(0).count(), t.len());
 
     // And each survivor is still reachable by name, so the walk and the lookup agree.
