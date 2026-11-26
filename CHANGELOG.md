@@ -3,6 +3,11 @@
 Dates are UTC. One line per release, what changed and why, so a reader of the diff has the
 sentence beside it.
 
+## Unreleased
+
+- The manifest names the documentation on docs.rs and adds the `no-std::no-alloc` category, which
+  fits a table that never allocates.
+
 ## 0.1.0-pre.4
 
 - Breaking: the crate removes `Table::live_slot_indices` and makes `Table::slot_index` private. They served a
