@@ -1,24 +1,24 @@
 Falsifies `generational_table::verification::live_names_are_distinct_and_resolve_to_their_own_entry`.
 
-The defect: `name` packs the two fields the other way round while `unpack` is left alone. The
-pair has to agree and nothing makes them, which is what this kind of hand-rolled packing costs;
-the crate doc says "a name packs `(generation, slot)`" and reading that order into the shift is
-the error.
+The defect: `EntryName::new` packs the two fields the other way round while `unpack` is left
+alone. The pair has to agree and nothing makes them, which is what this kind of hand-rolled
+packing costs; the crate doc says "a name packs `(generation, slot)`" and reading that order into
+the shift is the error.
 
 Expected to fail: the harness's `assert_eq!(t.get(b).copied(), Some(b_val))`. The first slot's
 name survives the transposition (both halves are zero), so a table that is only ever used one
 entry at a time would look correct; the second entry's name unpacks to slot 0 with generation 1
 and resolves to nothing.
 diff --git a/src/lib.rs b/src/lib.rs
-index 684df60..0b36a05 100644
+index 09b6084..1286e1f 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -201,7 +201,7 @@ impl<T, const N: usize> Table<T, N> {
-     const RETIRED: u32 = u32::MAX;
+@@ -127,7 +127,7 @@ impl<T> EntryName<T> {
  
-     const fn name(slot: usize, generation: u32) -> EntryName<T> {
--        EntryName::from_bits(((generation as u64) << 32) | slot as u64)
-+        EntryName::from_bits(((slot as u64) << 32) | generation as u64)
+     /// The name of `slot` at `generation`: the generation in the high 32 bits, the slot in the low.
+     const fn new(slot: usize, generation: u32) -> Self {
+-        Self::from_bits(((generation as u64) << 32) | slot as u64)
++        Self::from_bits(((slot as u64) << 32) | generation as u64)
      }
+ }
  
-     /// The slot and the generation a name spells, each as the 32 bits it holds. The slot stays a

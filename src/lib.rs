@@ -2,9 +2,8 @@
 //! [`EntryName<T>`], which packs `(generation, slot)` into one `u64` and carries the table's entry
 //! type, so a name minted by a table of one entry type cannot be handed to a table of another. A
 //! removal bumps the slot's generation, so a stale name is `None` forever, slot reused or not
-//! (proved below). Slots are reused, so the table stays a fixed array, while a stale name is not a
-//! dangling reference and not somebody else's entry; it is `None`. Game engines call the same shape
-//! a slotmap.
+//! (proved below). Slots are reused, so the table stays a fixed array, while a stale name is
+//! neither a dangling reference nor somebody else's entry. Game engines call it a slotmap.
 //!
 //! ```
 //! use generational_table::{EntryName, Table};
@@ -34,10 +33,11 @@
 //!
 //! # Traits
 //!
-//! `Table<T, N>` implements `Clone` when `T: Clone` and `Debug` when `T: Debug`. It has no
-//! `Default` beyond [`Table::new`]'s empty table, no `PartialEq` and no `Hash`. `EntryName<T>`
-//! implements `Clone`, `Copy`, `PartialEq`, `Eq`, `PartialOrd`, `Ord`, `Hash` and `Debug` for
-//! every `T`, and no `Default`: every `u64` is a name, so there is no name to call the default.
+//! `Table<T, N>` implements `Clone` when `T: Clone`, `Debug` when `T: Debug`, and `IntoIterator`
+//! by shared reference, by mutable reference and by value, each yielding a live entry with its
+//! name. It has no `Default` beyond [`Table::new`]'s empty table, no `PartialEq` and no `Hash`.
+//! `EntryName<T>` implements `Clone`, `Copy`, `PartialEq`, `Eq`, `PartialOrd`, `Ord`, `Hash` and
+//! `Debug` for every `T`, and no `Default`: every `u64` is a name, so none is the default.
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
@@ -46,6 +46,10 @@ use core::cmp::Ordering;
 use core::fmt;
 use core::hash::{Hash, Hasher};
 use core::marker::PhantomData;
+
+mod iter;
+
+pub use iter::{IntoIter, Iter, IterFromSlotIndex, IterMut, Values, ValuesMut};
 
 #[cfg(doctest)]
 #[doc = include_str!("../README.md")]
@@ -104,6 +108,17 @@ impl<T> EntryName<T> {
 
     /// The packed word, for a boundary that carries a plain `u64`: a syscall register, an atomic.
     /// [`from_bits`](Self::from_bits) of the result is this name again.
+    ///
+    /// ```
+    /// use generational_table::{EntryName, Table};
+    ///
+    /// let mut t: Table<char, 4> = Table::new();
+    /// t.insert('a').unwrap();
+    /// let b = t.insert('b').unwrap();
+    /// // Generation 0 in the high half, slot 1 in the low.
+    /// assert_eq!(b.to_bits(), 1);
+    /// assert_eq!(EntryName::<char>::NEVER_MINTED.to_bits(), u64::MAX);
+    /// ```
     #[inline(always)]
     pub const fn to_bits(self) -> u64 {
         self.bits
@@ -111,12 +126,29 @@ impl<T> EntryName<T> {
 
     /// The name a packed word spells. Total: every `u64` is a name, and one the table never
     /// minted resolves to nothing.
+    ///
+    /// ```
+    /// use generational_table::{EntryName, Table};
+    ///
+    /// let mut t: Table<char, 4> = Table::new();
+    /// let a = t.insert('a').unwrap();
+    /// // A word that came back across a boundary names the entry again.
+    /// let word = a.to_bits();
+    /// assert_eq!(t.get(EntryName::from_bits(word)), Some(&'a'));
+    /// // A word the table never minted names nothing.
+    /// assert_eq!(t.get(EntryName::from_bits(0x1234_5678_9abc)), None);
+    /// ```
     #[inline(always)]
     pub const fn from_bits(bits: u64) -> Self {
         Self {
             bits,
             entry: PhantomData,
         }
+    }
+
+    /// The name of `slot` at `generation`: the generation in the high 32 bits, the slot in the low.
+    const fn new(slot: usize, generation: u32) -> Self {
+        Self::from_bits(((generation as u64) << 32) | slot as u64)
     }
 }
 
@@ -224,6 +256,24 @@ pub struct Table<T, const N: usize> {
 
 impl<T, const N: usize> Table<T, N> {
     /// An empty table: every slot free, every generation at 0.
+    ///
+    /// `new` is a `const fn`, so a table can fill a `static` and never touch the stack.
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// static EMPTY: Table<u64, 1024> = Table::new();
+    /// assert!(EMPTY.is_empty());
+    ///
+    /// let mut local: Table<&str, 8> = Table::new();
+    /// assert!(local.insert("first").is_some());
+    /// ```
+    ///
+    /// `N` of 0 does not compile:
+    ///
+    /// ```compile_fail
+    /// let t: generational_table::Table<u8, 0> = generational_table::Table::new();
+    /// ```
     pub const fn new() -> Self {
         // A compile-time guard on the packing: slots must fit in the low 32 bits.
         const { assert!(N > 0 && N <= u32::MAX as usize) };
@@ -241,7 +291,7 @@ impl<T, const N: usize> Table<T, N> {
     const RETIRED: u32 = u32::MAX;
 
     const fn name(slot: usize, generation: u32) -> EntryName<T> {
-        EntryName::from_bits(((generation as u64) << 32) | slot as u64)
+        EntryName::new(slot, generation)
     }
 
     /// The slot and the generation a name spells, each as the 32 bits it holds. The slot stays a
@@ -330,6 +380,16 @@ impl<T, const N: usize> Table<T, N> {
 
     /// Resolve a name. `None` for a name whose entry was removed (however long ago), a name from
     /// a previous occupant of the slot, or garbage. Never the wrong entry.
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut t: Table<&str, 4> = Table::new();
+    /// let a = t.insert("a").unwrap();
+    /// assert_eq!(t.get(a), Some(&"a"));
+    /// t.remove(a);
+    /// assert_eq!(t.get(a), None);
+    /// ```
     #[inline(always)]
     pub fn get(&self, name: EntryName<T>) -> Option<&T> {
         let slot = self.slot_index(name)?;
@@ -338,20 +398,101 @@ impl<T, const N: usize> Table<T, N> {
 
     /// Whether `name` resolves to a live entry: [`get`](Self::get) without the reference. `false`
     /// for a removed name, a name from a previous occupant of the slot, or garbage.
+    ///
+    /// ```
+    /// use generational_table::{EntryName, Table};
+    ///
+    /// let mut t: Table<u8, 4> = Table::new();
+    /// let a = t.insert(1).unwrap();
+    /// assert!(t.contains_key(a));
+    /// assert!(!t.contains_key(EntryName::NEVER_MINTED));
+    /// t.remove(a);
+    /// assert!(!t.contains_key(a));
+    /// ```
     pub fn contains_key(&self, name: EntryName<T>) -> bool {
         self.slot_index(name).is_some()
     }
 
     /// [`get`](Self::get), mutably.
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut counters: Table<u32, 4> = Table::new();
+    /// let hits = counters.insert(0).unwrap();
+    /// *counters.get_mut(hits).unwrap() += 1;
+    /// assert_eq!(counters.get(hits), Some(&1));
+    /// ```
     #[inline(always)]
     pub fn get_mut(&mut self, name: EntryName<T>) -> Option<&mut T> {
         let slot = self.slot_index(name)?;
         self.slots[slot].as_mut()
     }
 
+    /// [`get_mut`](Self::get_mut) for several names at once: a mutable reference to each entry, in
+    /// the order of `names`, or `None` if any name does not resolve or two names are the same
+    /// name. The cost grows with `M`, not with `N`: the names are sorted by slot, with no
+    /// allocation, and the table is split once between each pair.
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut accounts: Table<u32, 4> = Table::new();
+    /// let alice = accounts.insert(100).unwrap();
+    /// let bob = accounts.insert(20).unwrap();
+    ///
+    /// // Move 30 from Alice to Bob, holding both entries at once.
+    /// let [from, to] = accounts.get_disjoint_mut([alice, bob]).unwrap();
+    /// *from -= 30;
+    /// *to += 30;
+    /// assert_eq!((accounts.get(alice), accounts.get(bob)), (Some(&70), Some(&50)));
+    ///
+    /// // The same name twice is refused, as is a dead name.
+    /// assert!(accounts.get_disjoint_mut([alice, alice]).is_none());
+    /// accounts.remove(bob);
+    /// assert!(accounts.get_disjoint_mut([alice, bob]).is_none());
+    /// ```
+    pub fn get_disjoint_mut<const M: usize>(
+        &mut self,
+        names: [EntryName<T>; M],
+    ) -> Option<[&mut T; M]> {
+        // Each name's slot beside its place in `names`, sorted by slot, so a repeat sits next to
+        // its twin and the slots can be split off the table from the low end up.
+        let mut slots = [(0, 0); M];
+        for (place, name) in names.into_iter().enumerate() {
+            slots[place] = (self.slot_index(name)?, place);
+        }
+        slots.sort_unstable();
+        if slots.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+            return None;
+        }
+        let mut found: [Option<&mut T>; M] = [const { None }; M];
+        let mut rest: &mut [Option<T>] = &mut self.slots;
+        let mut first_in_rest = 0;
+        for (slot, place) in slots {
+            let (entry, tail) =
+                core::mem::take(&mut rest)[slot - first_in_rest..].split_first_mut()?;
+            found[place] = entry.as_mut();
+            rest = tail;
+            first_in_rest = slot + 1;
+        }
+        // Every slot resolved above, so every place holds its entry.
+        Some(found.map(|entry| entry.expect("a slot that resolved holds its entry")))
+    }
+
     /// Remove and return the entry, bumping the slot's generation: from this moment `name` (and
     /// every copy of it, wherever it is held) resolves to `None`, forever. The bump saturates, so
     /// the occupant at `RETIRED - 1` leaves its slot retired rather than wrapping it to 0.
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut t: Table<String, 4> = Table::new();
+    /// let a = t.insert("a".to_string()).unwrap();
+    /// let copy = a;
+    /// assert_eq!(t.remove(a).as_deref(), Some("a"));
+    /// assert_eq!(t.remove(copy), None, "every copy of the name died with the entry");
+    /// ```
     pub fn remove(&mut self, name: EntryName<T>) -> Option<T> {
         let slot = self.slot_index(name)?;
         let value = self.slots[slot].take()?;
@@ -407,57 +548,163 @@ impl<T, const N: usize> Table<T, N> {
         self.scan_from = 0;
     }
 
+    /// Keep only the entries `keep` accepts: `keep` sees each live entry once, in slot order, with
+    /// its name, and every entry it answers `false` for is removed as [`remove`](Self::remove)
+    /// removes it, so its name and every copy of it resolve to `None` from then on. `keep` may
+    /// change an entry it keeps. The cost is what the table holds, not `N`.
+    ///
+    /// If `keep` panics, the entries it already refused are removed and the rest stay, and the
+    /// table stays whole.
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut t: Table<u32, 8> = Table::new();
+    /// let names: Vec<_> = (1..=6).map(|v| t.insert(v).unwrap()).collect();
+    /// t.retain(|_name, value| *value % 2 == 0);
+    /// assert_eq!(t.values().copied().collect::<Vec<_>>(), [2, 4, 6]);
+    /// assert_eq!(t.get(names[0]), None, "a refused entry's name is dead");
+    /// assert_eq!(t.get(names[1]), Some(&2));
+    /// ```
+    pub fn retain(&mut self, mut keep: impl FnMut(EntryName<T>, &mut T) -> bool) {
+        // A `for` over `N` with a `break`, as in `remove`, so CBMC sees the bound. `top` only comes
+        // down as entries go, and every slot at or above it is free, so the walk misses nothing.
+        for slot in 0..N {
+            if slot >= self.top {
+                break;
+            }
+            let name = Self::name(slot, self.generations[slot]);
+            let Some(value) = self.slots[slot].as_mut() else {
+                continue;
+            };
+            if !keep(name, value) {
+                // `remove` keeps the count, the bound and the cursor true before the entry drops.
+                drop(self.remove(name));
+            }
+        }
+    }
+
     /// The number of slots, `N`, live, free and retired alike: for code generic over the table's
     /// size. It is not how many entries fit once a slot retires. A table holds at most this many entries, and fewer once a slot retires.
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut t: Table<u8, 16> = Table::new();
+    /// t.insert(1).unwrap();
+    /// assert_eq!(t.slot_count(), 16);
+    /// assert_eq!(t.len(), 1);
+    /// ```
     pub const fn slot_count(&self) -> usize {
         N
     }
 
     /// The number of live entries. O(1): maintained on every insert and remove rather than
     /// counted by walking `slots`.
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut t: Table<u8, 4> = Table::new();
+    /// let a = t.insert(1).unwrap();
+    /// t.insert(2).unwrap();
+    /// assert_eq!(t.len(), 2);
+    /// t.remove(a);
+    /// assert_eq!(t.len(), 1);
+    /// ```
     pub fn len(&self) -> usize {
         self.live
     }
 
     /// Whether the table currently holds no live entries.
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut t: Table<u8, 4> = Table::new();
+    /// assert!(t.is_empty());
+    /// let a = t.insert(1).unwrap();
+    /// assert!(!t.is_empty());
+    /// t.remove(a);
+    /// assert!(t.is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         self.live == 0
     }
 
     /// Every live entry by mutable reference, in slot order. For whole-table sweeps, such as revoking every record that refers to something that is
     /// going away; nothing on a hot path should iterate.
-    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
-        let top = self.top;
-        self.slots[..top].iter_mut().filter_map(|s| s.as_mut())
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut balances: Table<u32, 4> = Table::new();
+    /// balances.insert(10).unwrap();
+    /// balances.insert(20).unwrap();
+    /// for balance in balances.values_mut() {
+    ///     *balance *= 2;
+    /// }
+    /// assert_eq!(balances.values().copied().collect::<Vec<_>>(), [20, 40]);
+    /// ```
+    pub fn values_mut(&mut self) -> ValuesMut<'_, T> {
+        ValuesMut::new(self)
     }
 
     /// Every live entry by shared reference, in slot order. For a table whose values *are* the
     /// storage (a table of raw pointers to entries that live elsewhere, for example), this is
     /// how the caller reaches each without a second lookup.
-    pub fn values(&self) -> impl Iterator<Item = &T> + '_ {
-        self.slots[..self.top].iter().filter_map(|s| s.as_ref())
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut t: Table<u32, 4> = Table::new();
+    /// let a = t.insert(1).unwrap();
+    /// t.insert(2).unwrap();
+    /// t.insert(3).unwrap();
+    /// t.remove(a);
+    /// assert_eq!(t.values().sum::<u32>(), 5);
+    /// assert_eq!(t.values().len(), 2);
+    /// ```
+    pub fn values(&self) -> Values<'_, T> {
+        Values::new(self)
     }
 
     /// Every live entry with its current name, in slot order. For sweeps that must *remove* what
     /// they find and so need the name, not just the value (for example, find every entry
     /// that refers to something going away, then remove it by name). `values`/`values_mut` suffice when the caller
     /// only needs the entry, as when each entry carries its own name.
-    pub fn iter(&self) -> impl Iterator<Item = (EntryName<T>, &T)> + '_ {
-        self.iter_from_slot_index(0).map(|(_, name, t)| (name, t))
+    ///
+    /// ```
+    /// use generational_table::Table;
+    ///
+    /// let mut t: Table<&str, 4> = Table::new();
+    /// let a = t.insert("a").unwrap();
+    /// let b = t.insert("b").unwrap();
+    /// let walked: Vec<_> = t.iter().collect();
+    /// assert_eq!(walked, [(a, &"a"), (b, &"b")]);
+    /// ```
+    pub fn iter(&self) -> Iter<'_, T> {
+        Iter::new(self)
     }
 
     /// Every live entry with its current name, by mutable reference, in slot order. For sweeps
     /// that change entries and also need each entry's name, which
     /// [`values_mut`](Self::values_mut) does not give.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (EntryName<T>, &mut T)> + '_ {
-        let top = self.top;
-        self.slots[..top]
-            .iter_mut()
-            .zip(&self.generations)
-            .enumerate()
-            .filter_map(|(slot, (s, &generation))| {
-                s.as_mut().map(|t| (Self::name(slot, generation), t))
-            })
+    ///
+    /// ```
+    /// use generational_table::{EntryName, Table};
+    ///
+    /// // Each entry records its own name, as `insert_with_name` would have handed it.
+    /// let mut t: Table<(u64, &str), 4> = Table::new();
+    /// t.insert((0, "a")).unwrap();
+    /// t.insert((0, "b")).unwrap();
+    /// for (name, entry) in t.iter_mut() {
+    ///     entry.0 = name.to_bits();
+    /// }
+    /// assert!(t.iter().all(|(name, entry)| entry.0 == name.to_bits()));
+    /// ```
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
+        IterMut::new(self)
     }
 
     /// Every live entry from slot `first_slot_index` onward, as `(slot, name, &T)`, in slot order.
@@ -488,18 +735,8 @@ impl<T, const N: usize> Table<T, N> {
     /// // And a cursor past the end is empty rather than a panic.
     /// assert_eq!(t.iter_from_slot_index(99).count(), 0);
     /// ```
-    pub fn iter_from_slot_index(
-        &self,
-        first_slot_index: usize,
-    ) -> impl Iterator<Item = (usize, EntryName<T>, &T)> + '_ {
-        self.slots[..self.top]
-            .iter()
-            .enumerate()
-            .skip(first_slot_index)
-            .filter_map(|(slot, s)| {
-                s.as_ref()
-                    .map(|t| (slot, Self::name(slot, self.generations[slot]), t))
-            })
+    pub fn iter_from_slot_index(&self, first_slot_index: usize) -> IterFromSlotIndex<'_, T> {
+        IterFromSlotIndex::new(self, first_slot_index)
     }
 }
 
@@ -1194,5 +1431,118 @@ mod tests {
         let mut copy = t.clone();
         let name = copy.insert_with_name(|_| 1).unwrap();
         assert_eq!(name.to_bits() & 0xffff_ffff, 1);
+    }
+
+    /// `retain` hands each live entry its own name, in slot order, removes what it refuses as
+    /// `remove` does, and keeps a change made to an entry it keeps.
+    #[test]
+    fn retain_removes_what_the_test_refuses_and_kills_those_names() {
+        let mut t: Table<u32, 8> = Table::new();
+        let names: Vec<_> = (0..5).map(|v| t.insert(v).unwrap()).collect();
+        t.remove(names[1]);
+
+        let mut seen = Vec::new();
+        t.retain(|name, value| {
+            seen.push(name);
+            *value += 10;
+            *value != 12 && *value != 14
+        });
+        assert_eq!(seen, [names[0], names[2], names[3], names[4]]);
+        assert_eq!(t.values().copied().collect::<Vec<_>>(), [10, 13]);
+        assert_eq!(t.len(), 2);
+        assert_eq!(t.get(names[2]), None);
+        assert_eq!(t.get(names[4]), None);
+        assert_eq!(t.generations[..5], [0, 1, 1, 0, 1]);
+        assert_eq!(t.top, 4, "the bound came down past the refused top entry");
+        assert_eq!(t.scan_from, 1, "the cursor sits at the lowest free slot");
+        let refilled = t.insert(99).unwrap();
+        assert_eq!(refilled.to_bits(), (1 << 32) | 1);
+    }
+
+    /// Refusing everything empties the table and walks nothing after; keeping everything changes
+    /// no name.
+    #[test]
+    fn retain_of_all_or_nothing() {
+        let mut t: Table<u32, 4> = Table::new();
+        let names: Vec<_> = (0..3).map(|v| t.insert(v).unwrap()).collect();
+        t.retain(|_, _| true);
+        assert!(names.iter().all(|&n| t.contains_key(n)));
+        t.retain(|_, _| false);
+        assert!(t.is_empty());
+        assert_eq!(t.top, 0);
+        assert_eq!(t.scan_from, 0);
+        assert!(names.iter().all(|&n| !t.contains_key(n)));
+        t.retain(|_, _| unreachable!("an empty table has nothing to test"));
+    }
+
+    /// A slot at its last generation retires through `retain` as through `remove`.
+    #[test]
+    fn retain_retires_a_slot_at_its_last_generation() {
+        let mut t: Table<u32, 2> = Table::new();
+        t.generations[0] = Table::<u32, 2>::RETIRED - 1;
+        t.insert(1).unwrap();
+        t.retain(|_, _| false);
+        assert_eq!(t.generations[0], Table::<u32, 2>::RETIRED);
+        assert_eq!(t.insert(2).map(|n| n.to_bits() & 0xffff_ffff), Some(1));
+    }
+
+    /// A test that panics partway leaves what it already refused removed, the rest in place, and
+    /// the bookkeeping true.
+    #[test]
+    fn a_panicking_test_in_retain_leaves_the_table_whole() {
+        let mut t: Table<u32, 4> = Table::new();
+        let names: Vec<_> = (0..4).map(|v| t.insert(v).unwrap()).collect();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            t.retain(|_, value| match *value {
+                0 => false,
+                2 => panic!("the test gave up"),
+                _ => true,
+            });
+        }));
+        assert!(result.is_err());
+        assert_eq!(t.len(), 3);
+        assert!(!t.contains_key(names[0]));
+        assert!(names[1..].iter().all(|&n| t.contains_key(n)));
+        assert_eq!(t.values().count(), 3);
+        assert_eq!(t.scan_from, 0);
+    }
+
+    /// `get_disjoint_mut` hands back each named entry in the order of the names, whatever their
+    /// slot order, and a write through each lands in that entry.
+    #[test]
+    fn get_disjoint_mut_follows_the_order_of_the_names() {
+        let mut t: Table<u32, 5> = Table::new();
+        let names: Vec<_> = (0..5).map(|v| t.insert(v * 10).unwrap()).collect();
+        let [d, a, c] = t.get_disjoint_mut([names[3], names[0], names[2]]).unwrap();
+        assert_eq!((*d, *a, *c), (30, 0, 20));
+        *d += 1;
+        *a += 2;
+        *c += 3;
+        assert_eq!(t.values().copied().collect::<Vec<_>>(), [2, 10, 23, 31, 40]);
+
+        let [only] = t.get_disjoint_mut([names[4]]).unwrap();
+        *only = 7;
+        assert_eq!(t.get(names[4]), Some(&7));
+        assert_eq!(t.get_disjoint_mut::<0>([]), Some([]));
+    }
+
+    /// Any dead, forged or repeated name refuses the whole borrow.
+    #[test]
+    fn get_disjoint_mut_refuses_a_dead_forged_or_repeated_name() {
+        let mut t: Table<u32, 4> = Table::new();
+        let a = t.insert(1).unwrap();
+        let b = t.insert(2).unwrap();
+        let c = t.insert(3).unwrap();
+        assert!(t.get_disjoint_mut([a, b, a]).is_none());
+        assert!(t.get_disjoint_mut([c, c]).is_none());
+        assert!(t.get_disjoint_mut([a, EntryName::NEVER_MINTED]).is_none());
+        assert!(t.get_disjoint_mut([EntryName::from_bits(3), a]).is_none());
+        t.remove(b);
+        let reused = t.insert(9).unwrap();
+        assert!(
+            t.get_disjoint_mut([b, c]).is_none(),
+            "a dead name reached its slot"
+        );
+        assert!(t.get_disjoint_mut([reused, c, a]).is_some());
     }
 }

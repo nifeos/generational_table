@@ -8,12 +8,12 @@ Expected to fail: the harness's `assert_eq!(t.contains_key(probe), t.get(probe).
 any word whose slot is occupied and whose generation is not that slot's: a removed name whose
 slot took a new entry is reported as a key.
 diff --git a/src/lib.rs b/src/lib.rs
-index 2214a94..3316e92 100644
+index 24120bc..0d19c1e 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -302,7 +302,9 @@ impl<T, const N: usize> Table<T, N> {
-     /// Whether `name` resolves to a live entry: [`get`](Self::get) without the reference. `false`
-     /// for a removed name, a name from a previous occupant of the slot, or garbage.
+@@ -410,7 +410,9 @@ impl<T, const N: usize> Table<T, N> {
+     /// assert!(!t.contains_key(a));
+     /// ```
      pub fn contains_key(&self, name: EntryName<T>) -> bool {
 -        self.slot_index(name).is_some()
 +        self.slots

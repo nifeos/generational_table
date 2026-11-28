@@ -3,6 +3,27 @@
 Dates are UTC. One line per release, what changed and why, so a reader of the diff has the
 sentence beside it.
 
+## Unreleased
+
+- The walks return named types, `Values`, `ValuesMut`, `Iter`, `IterMut` and `IterFromSlotIndex`, in
+  place of `impl Iterator`, so a caller can keep one in a field. Each implements
+  `DoubleEndedIterator` and `FusedIterator`, and each but `IterFromSlotIndex` implements
+  `ExactSizeIterator`, counting down from the table's live count. The shared walks implement `Clone`
+  for every entry type.
+- `Table` implements `IntoIterator` by shared reference, by mutable reference and by value, so
+  `for (name, entry) in &table` compiles. The walk by value is the new `IntoIter`.
+- `Table::retain` removes every entry a test refuses, as `remove` removes it, and hands the test
+  each entry's name. A `no_std` caller had no buffer to hold the names between a walk and the
+  removals. A new Kani harness proves it, and the induction harnesses take it as one more
+  operation.
+- `Table::get_disjoint_mut` returns a mutable reference to each of several named entries at once,
+  or `None` if any name is dead or two names repeat, so moving a value between two entries no
+  longer needs a remove and a reinsert. It allocates nothing and costs what the names cost, not `N`.
+- Every public method now carries a short example in its documentation, `new` a `static` table
+  and a refused `N` of 0 among them.
+- The manifest names the documentation on docs.rs and adds the `no-std::no-alloc` category, which
+  fits a table that never allocates.
+
 ## 0.1.0-pre.4
 
 - Breaking: the crate removes `Table::live_slot_indices` and makes `Table::slot_index` private. They served a

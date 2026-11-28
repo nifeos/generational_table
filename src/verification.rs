@@ -63,14 +63,15 @@ fn can_take(t: &Table<u8, 2>, slot: usize) -> bool {
     t.slots[slot].is_none() && t.generations[slot] != Table::<u8, 2>::RETIRED
 }
 
-/// One insert, one remove of any name, or one clear: every operation that changes a slot or a
-/// generation.
+/// One insert, one remove of any name, one clear, or one retain with any answers: every
+/// operation that changes a slot or a generation.
 fn any_operation(t: &mut Table<u8, 2>) {
     match kani::any::<u8>() {
         0 => {
             let _ = t.insert_with_name(|_| kani::any());
         }
         1 => t.clear(),
+        2 => t.retain(|_, _| kani::any()),
         _ => {
             let _ = t.remove(EntryName::from_bits(kani::any()));
         }
@@ -252,8 +253,10 @@ fn a_name_the_table_never_minted_resolves_to_nothing() {
 /// The occupancy bound never hides a live entry. Fill three slots, remove an arbitrary subset
 /// (all eight, holes under a live entry and the empty table included), and every walk must
 /// report exactly as many entries as `len` claims. A subset rather than an operation sequence,
-/// which did not finish in a practical time under Kani.
+/// which did not finish in a practical time under Kani. Unwound to five, past the longest walk
+/// over three slots: without one, the model checker found no bound for the named walks' loops.
 #[kani::proof]
+#[kani::unwind(5)]
 fn a_bounded_walk_yields_every_live_entry() {
     let mut t: Table<u8, 3> = Table::new();
     let names = [
@@ -290,4 +293,40 @@ fn a_clone_resolves_exactly_the_same_names() {
     let probe = EntryName::from_bits(kani::any());
     assert_eq!(t.get(probe), copy.get(probe));
     assert_eq!(t.len(), copy.len());
+}
+
+/// Falsification: replayable `falsifications/verification.retain_removes_exactly_what_the_test_refuses.patch`
+/// `retain` removes exactly the entries its test refuses, as `remove` would. From any reachable
+/// table and any answers, the test sees each live entry once under the name that resolves to it,
+/// a kept entry still resolves under that name, and a refused one resolves nowhere and leaves its
+/// slot one generation on, so the slot's next occupant is named anew.
+#[kani::proof]
+#[kani::unwind(3)]
+fn retain_removes_exactly_what_the_test_refuses() {
+    let mut t = any_reachable_table();
+    let before = t.clone();
+    let keep: [bool; 2] = [kani::any(), kani::any()];
+    let mut seen = [None; 2];
+    t.retain(|name, _| {
+        let slot = (name.to_bits() & 0xffff_ffff) as usize;
+        assert!(seen[slot].is_none(), "the test saw an entry twice");
+        seen[slot] = Some(name);
+        keep[slot]
+    });
+
+    for slot in 0..2 {
+        let name = Table::<u8, 2>::name(slot, before.generations[slot]);
+        if before.slots[slot].is_none() {
+            assert!(seen[slot].is_none(), "the test saw a free slot");
+            assert_eq!(t.generations[slot], before.generations[slot]);
+            continue;
+        }
+        assert_eq!(seen[slot], Some(name), "the test saw the wrong name");
+        if keep[slot] {
+            assert_eq!(t.get(name), before.get(name));
+        } else {
+            assert!(t.get(name).is_none(), "a refused entry still resolves");
+            assert_eq!(t.generations[slot], before.generations[slot] + 1);
+        }
+    }
 }
