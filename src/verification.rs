@@ -254,7 +254,7 @@ fn a_name_the_table_never_minted_resolves_to_nothing() {
 /// (all eight, holes under a live entry and the empty table included), and every walk must
 /// report exactly as many entries as `len` claims. A subset rather than an operation sequence,
 /// which did not finish in a practical time under Kani. Unwound to five, past the longest walk
-/// over three slots: without a bound, CBMC did not bound the named walks' loops on its own.
+/// over three slots: without one, the model checker found no bound for the named walks' loops.
 #[kani::proof]
 #[kani::unwind(5)]
 fn a_bounded_walk_yields_every_live_entry() {
